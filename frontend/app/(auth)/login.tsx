@@ -3,9 +3,10 @@ import { View, TextInput, Button, Text } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/components/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { backendUrl } from '@/constants/Urls';
 
 export default function Login() {
-  const [username, setUsername] = useState('testUser');
+  const [username, setUsername] = useState('test');
   const [password, setPassword] = useState('password@123');
   const [error, setError] = useState('');
   const router = useRouter();
@@ -14,7 +15,7 @@ export default function Login() {
   const handleLogin = async () => {
     setError('');
     try {
-      const res = await fetch('http://10.0.2.2:8000/accounts/token/', {
+      const res = await fetch(`${backendUrl}/accounts/token/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -25,6 +26,7 @@ export default function Login() {
         login(username);
         await AsyncStorage.setItem('accessToken', data.access);
         await AsyncStorage.setItem('refreshToken', data.refresh);
+        await AsyncStorage.setItem('user', username);
         router.replace('/(tabs)');
       } else {
         setError(data.error || 'Login failed');

@@ -1,6 +1,7 @@
 from django.shortcuts import render
 from django.contrib.auth.models import User
 from .models import UserProfile
+from features.models import Follows
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -55,3 +56,55 @@ def Signup(request):
 #             return Response({"error": "Invalid password."}, status=400)
 #     except User.DoesNotExist:
 #         return Response({"error": "User does not exist."}, status=404)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def getProfileInfo(request):
+    print("Fetching profile info for user:", request.user.username)
+    try:
+        user = request.user
+        userProfile = UserProfile.objects.get(user=user)
+        followers, following = getUserFollowersAndFollowing(user)
+        profile_data = {
+            "name": userProfile.name,
+            "email": userProfile.email,
+            "dob": userProfile.dob,
+            "userId": user.id,
+            "username": user.username,
+            "followers": followers,
+            "following": following
+        }
+        return Response(profile_data, status=200)
+    except UserProfile.DoesNotExist:
+        return Response({"error": "User profile does not exist."}, status=404)
+    
+def getUserFollowersAndFollowing(user):
+    followers = Follows.objects.filter(following=user).count()
+    following = Follows.objects.filter(follower=user).count()
+    return followers, following
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def getOtherUserProfileInfo(request):
+    user_id = request.GET.get('user_id')
+    if not user_id:
+        return Response({"error": "user_id parameter is required."}, status=400)
+    try:
+        user = User.objects.get(id=user_id)
+        userProfile = UserProfile.objects.get(user=user)
+        followers, following = getUserFollowersAndFollowing(user)
+        profile_data = {
+            "name": userProfile.name,
+            "email": userProfile.email,
+            "dob": userProfile.dob,
+            "userId": user.id,
+            "username": user.username,
+            "followers": followers,
+            "following": following
+        }
+        return Response(profile_data, status=200)
+    except User.DoesNotExist:
+        return Response({"error": "User does not exist."}, status=404)
+    except UserProfile.DoesNotExist:
+        return Response({"error": "User profile does not exist."}, status=404)
