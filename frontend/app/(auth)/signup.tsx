@@ -3,6 +3,7 @@ import { View, TextInput, Button, Text } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/components/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { backendUrl } from '@/constants/Urls';
 
 export default function Signup() {
   const [username, setUsername] = useState('');
@@ -17,7 +18,7 @@ export default function Signup() {
   const handleSignup = async () => {
     setError('');
     try {
-      const res = await fetch('http://10.0.2.2:8000/accounts/signup/', {
+      const res = await fetch(`${backendUrl}/accounts/signup/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password, email, name, dob }),
@@ -25,7 +26,7 @@ export default function Signup() {
       const data = await res.json();
       if (res.ok) {
         // Automatically log in after signup
-        const loginRes = await fetch('http://10.0.2.2:8000/accounts/token/', {
+        const loginRes = await fetch(`${backendUrl}/accounts/token/`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, password }),
@@ -34,7 +35,8 @@ export default function Signup() {
         if (loginRes.ok && loginData.access) {
           await AsyncStorage.setItem('accessToken', loginData.access);
           await AsyncStorage.setItem('refreshToken', loginData.refresh);
-          login(username);
+          await AsyncStorage.setItem('user', username);
+          login(username);`${backendUrl}/accounts/token/`
           router.replace('/(tabs)');
         } else {
           setError('Signup succeeded but login failed');
