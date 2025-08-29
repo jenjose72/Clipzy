@@ -1,71 +1,136 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
-
-const WS_URL = 'ws://10.0.2.2:8000/ws/chat/room1/'; // Change to your backend IP if needed
+import { View, Text, TouchableOpacity, FlatList, StyleSheet } from 'react-native';
+import { backendUrl } from '@/constants/Urls';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
 
 const Chat = () => {
-  const [messages, setMessages] = useState<{id: number, text: string}[]>([]);
-  const [input, setInput] = useState('');
-  const ws = useRef<WebSocket | null>(null);
-  const msgId = useRef(0);
+  const [chatRooms, setChatRooms] = useState<any[]>([]);
+  const [followingUsers, setFollowingUsers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const router = useRouter();
+
+  const getChats = async () => {
+    setLoading(true);
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      const res = await fetch(`${backendUrl}/chat/getChats/`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      const data = await res.json();
+      console.log(data);
+      if (data.chat_rooms && data.chat_rooms.length > 0) {
+        setChatRooms(data.chat_rooms);
+        setFollowingUsers([]);
+      } else if (data.following && data.following.length > 0) {
+        setFollowingUsers(data.following);
+        setChatRooms([]);
+      }
+    } catch (e) {
+      setChatRooms([]);
+      setFollowingUsers([]);
+    }
+    setLoading(false);
+  };
 
   useEffect(() => {
-    ws.current = new WebSocket(WS_URL);
-    ws.current.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        setMessages(prev => [...prev, { id: ++msgId.current, text: data.message }]);
-      } catch {}
-    };
-    ws.current.onerror = (e) => {
-      setMessages(prev => [...prev, { id: ++msgId.current, text: 'Connection error.' }]);
-    };
-    ws.current.onclose = () => {
-      setMessages(prev => [...prev, { id: ++msgId.current, text: 'Disconnected.' }]);
-    };
-    return () => {
-      ws.current?.close();
-    };
+    getChats();
   }, []);
 
-  const sendMessage = () => {
-    if (input.trim() && ws.current?.readyState === 1) {
-      ws.current.send(JSON.stringify({ message: input }));
-      setInput('');
+  const sendMessageToRoom = async (roomId: number, content: string, videoId?: number) => {
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      const res = await fetch(`${backendUrl}/chat/sendMessage/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          room_id: roomId,
+          content,
+          ...(videoId ? { video_id: videoId } : {}),
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        return data; // Message object
+      } else {
+        throw new Error(data.error || 'Failed to send message');
+      }
+    } catch (e) {
+      // Optionally handle error
+      return null;
     }
   };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F5F6FA' }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.container}>
-          <Text style={styles.title}>Simple Chat Room</Text>
-          <FlatList
-            data={messages}
-            keyExtractor={item => item.id.toString()}
-            renderItem={({ item }) => (
-              <View style={styles.msgBubble}>
-                <Text style={styles.msgText}>{item.text}</Text>
-              </View>
-            )}
-            style={styles.msgList}
-          />
-          <View style={styles.inputRow}>
-            <TextInput
-              style={styles.input}
-              value={input}
-              onChangeText={setInput}
-              placeholder="Type a message..."
-              onSubmitEditing={sendMessage}
-              returnKeyType="send"
+      <View style={styles.container}>
+        <Text style={styles.title}>Chats</Text>
+        {loading ? (
+          <Text style={{ alignSelf: 'center', marginTop: 20 }}>Loading...</Text>
+        ) : chatRooms.length > 0 ? (
+          <>
+            <Text style={styles.subtitle}>Your Chat Rooms</Text>
+            <FlatList
+              data={chatRooms}
+              keyExtractor={item => item.room_id.toString()}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.roomCard}
+                  onPress={() => router.push(`/(tabs)/chatRoom/${item.room_id}`)}
+                >
+                  <Text style={styles.roomName}>{item.room_name || `Room ${item.room_id}`}</Text>
+                  <Text style={styles.roomUsers}>Users: {item.users.join(', ')}</Text>
+                </TouchableOpacity>
+              )}
             />
-            <TouchableOpacity style={styles.sendBtn} onPress={sendMessage}>
-              <Text style={styles.sendText}>Send</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </KeyboardAvoidingView>
+          </>
+        ) : followingUsers.length > 0 ? (
+          <>
+            <Text style={styles.subtitle}>Start a chat with someone you follow</Text>
+            <FlatList
+              data={followingUsers}
+              keyExtractor={item => item.user_id.toString()}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.userCard}
+                  onPress={async () => {
+                    try {
+                      const token = await AsyncStorage.getItem('accessToken');
+                      const res = await fetch(`${backendUrl}/chat/createRoom/`, {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          'Authorization': `Bearer ${token}`,
+                        },
+                        body: JSON.stringify({ participant_id: item.user_id }),
+                      });
+                      const data = await res.json();
+                      if (res.ok && data.room_id) {
+                        router.push({ pathname: '/(tabs)/chatRoom/[roomId]', params: { roomId: data.room_id.toString() } });
+                      }
+                    } catch (e) {
+                      // Optionally show error
+                    }
+                  }}
+                >
+                  <Text style={styles.username}>{item.username}</Text>
+                  <Text style={styles.userId}>User ID: {item.user_id}</Text>
+                </TouchableOpacity>
+              )}
+            />
+          </>
+        ) : (
+          <Text style={{ alignSelf: 'center', marginTop: 20 }}>No chats or following users found.</Text>
+        )}
+      </View>
     </SafeAreaView>
   );
 };
@@ -82,48 +147,46 @@ const styles = StyleSheet.create({
     color: '#222',
     alignSelf: 'center',
   },
-  msgList: {
-    flex: 1,
+  subtitle: {
+    fontSize: 16,
+    fontWeight: '600',
     marginBottom: 8,
+    color: '#4F8EF7',
+    alignSelf: 'flex-start',
   },
-  msgBubble: {
+  roomCard: {
     backgroundColor: '#e3e8f7',
     borderRadius: 8,
-    padding: 10,
-    marginVertical: 4,
-    alignSelf: 'flex-start',
-    maxWidth: '80%',
+    padding: 14,
+    marginVertical: 6,
   },
-  msgText: {
-    fontSize: 16,
+  roomName: {
+    fontSize: 18,
+    fontWeight: 'bold',
     color: '#333',
   },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
+  roomUsers: {
+    fontSize: 14,
+    color: '#555',
+    marginTop: 4,
   },
-  input: {
-    flex: 1,
+  userCard: {
     backgroundColor: '#fff',
     borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    fontSize: 16,
+    padding: 14,
+    marginVertical: 6,
     borderWidth: 1,
     borderColor: '#dbeafe',
-    marginRight: 8,
   },
-  sendBtn: {
-    backgroundColor: '#4F8EF7',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-  },
-  sendText: {
-    color: '#fff',
+  username: {
+    fontSize: 17,
     fontWeight: 'bold',
-    fontSize: 16,
+    color: '#222',
+  },
+  userId: {
+    fontSize: 13,
+    color: '#888',
+    marginTop: 2,
   },
 });
 
