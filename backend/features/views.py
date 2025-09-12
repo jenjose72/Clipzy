@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny,IsAuthenticated
 from rest_framework.response import Response
-from .models import Follows
+from .models import Follows, Clip, Like
 
 # Create your views here.
 @api_view(['GET'])
@@ -65,4 +65,32 @@ def unfollowUser(request):
         return Response({'message': 'Not following this user.'}, status=200)
     follow_relation.delete()
     return Response({'message': 'Unfollowed user.'}, status=200)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def getLikes(request):
+    user = request.user
+    videoId = request.data.get('videoId')
+    if not videoId:
+        return Response({'error': 'videoId is required.'}, status=400)
+    liked_videos = list(user.likes.filter(clip_id=videoId).values_list('clip_id', flat=True))
+    return Response({'liked_videos': liked_videos}, status=200)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def likeVideo(request):
+    user = request.user
+    video_id = request.data.get('video_id')
+    if not video_id:
+        return Response({'error': 'video_id is required.'}, status=400)
+    if user.likes.filter(clip_id=video_id).exists():
+        return Response({'message': 'Video already liked.'}, status=200)
+    try:
+        video = Clip.objects.get(id=video_id)
+        video.likeCount += 1
+        video.save()
+    except Clip.DoesNotExist:
+        return Response({'error': 'Video not found.'}, status=404)
+    Like.objects.create(user=user, clip=video)
+    return Response({'message': 'Video liked.'}, status=201)
 
