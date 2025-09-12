@@ -50,7 +50,7 @@ def getMessages(request, room_id):
     messages_data = [
         {
             'id': msg.id,
-            'sender': msg.sender.username,
+            'sender': msg.sender.id,
             'content': msg.content,
             'video': msg.video.id if msg.video else None,
             'timestamp': msg.timestamp,
@@ -109,3 +109,10 @@ def createRoom(request):
     room.participants.add(user, participant)
     room.save()
     return Response({'room_id': room.id, 'roomExists': False})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def getUserId(request):
+    user=request.user
+    return Response({'userId': user.id})

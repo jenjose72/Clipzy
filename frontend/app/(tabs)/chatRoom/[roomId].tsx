@@ -10,8 +10,31 @@ const ChatRoomPage = () => {
 	const [messages, setMessages] = useState<any[]>([]);
 	const [input, setInput] = useState('');
 	const [loading, setLoading] = useState(true);
+	const [user, setUser] = useState('');
+	const [userId, setUserId] = useState<string | null>(null);
 	const ws = useRef<WebSocket | null>(null);
-	const user=AsyncStorage.getItem('user');
+	const [wsReady, setWsReady] = useState(false);
+
+	useEffect(() => {
+		AsyncStorage.getItem('user').then(u => u && setUser(u));
+		const fetchUserId = async () => {
+			try {
+				const token = await AsyncStorage.getItem('accessToken');
+				const res = await fetch(`${backendUrl}/chat/getUserId/`, {
+					method: 'POST',
+					headers: {
+						'Authorization': `Bearer ${token}`,
+						'Content-Type': 'application/json',
+					},
+				});
+				const data = await res.json();
+				if (res.ok && data.userId) {
+					setUserId(data.userId.toString());
+				}
+			} catch {}
+		};
+		fetchUserId();
+	}, []);
 
 	useEffect(() => {
 		// Fetch initial messages (optional, if you want to show history)
@@ -27,43 +50,44 @@ const ChatRoomPage = () => {
 					},
 				});
 				const data = await res.json();
-				console.log(data);
-				console.log(user._j);
 				if (res.ok && data.messages) {
 					setMessages(
-						data.messages.map(msg => ({
+						data.messages.map((msg: any) => ({
 							text: msg.content,
-							sender: msg.sender === user._j ? 'me' : msg.sender
+							sender: msg.sender.toString() === userId ? 'me' : msg.sender.toString()
 						}))
 					);
 				}
 			} catch {}
 			setLoading(false);
 		};
-		if (roomId) fetchMessages();
-	}, [roomId]);
+		if (roomId && userId) fetchMessages();
+	}, [roomId, userId]);
 
 	useEffect(() => {
 		// Connect to WebSocket for real-time chat
-		if (!roomId) return;
-		ws.current = new WebSocket(`ws://10.0.2.2:8000/ws/chat/${roomId}/`);
+		if (!roomId || !userId) return;
+		if (!ws.current) {
+			ws.current = new WebSocket(`ws://10.0.2.2:8000/ws/chat/${roomId}/`);
+			ws.current.onopen = () => setWsReady(true);
+			ws.current.onclose = () => setWsReady(false);
+		}
 		ws.current.onmessage = (e) => {
 			try {
 				const data = JSON.parse(e.data);
 				if (data.message) {
-					setMessages(prev => [...prev, { text: data.message, sender: data.sender || 'other' }]);
+					setMessages(prev => [...prev, { text: data.message, sender: data.sender.toString() === userId ? 'me' : data.sender.toString() }]);
 				}
 			} catch {}
 		};
 		return () => {
 			ws.current?.close();
 		};
-	}, [roomId]);
+	}, [roomId, userId]);
 
 	const sendMessage = async () => {
-		if (input.trim() && ws.current?.readyState === 1) {
-			ws.current.send(JSON.stringify({ message: input }));
-			setMessages(prev => [...prev, { text: input, sender: user }]);
+		if (input.trim() && wsReady && userId) {
+			ws.current?.send(JSON.stringify({ message: input, sender: userId }));
 			try {
 				const token = await AsyncStorage.getItem('accessToken');
 				await fetch(`${backendUrl}/chat/sendMessage/`, {
