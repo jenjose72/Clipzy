@@ -84,6 +84,31 @@ def getUserFollowersAndFollowing(user):
     return followers, following
 
 
+@api_view(['POST'])
+def request_otp(request):
+    """Dummy endpoint to request an OTP for an email address.
+    Accepts JSON { "email": "..." } and always responds with success for testing.
+    """
+    email = request.data.get('email')
+    if not email:
+        return Response({"error": "email is required"}, status=400)
+    # In a real implementation we'd generate and send an OTP here.
+    return Response({"message": "OTP requested", "email": email}, status=200)
+
+
+@api_view(['POST'])
+def verify_otp(request):
+    """Dummy endpoint to verify an OTP.
+    Accepts JSON { "email": "...", "otp": "..." } and returns success when otp is provided.
+    """
+    email = request.data.get('email')
+    otp = request.data.get('otp')
+    if not email or not otp:
+        return Response({"error": "email and otp are required"}, status=400)
+    # For testing, accept any OTP that is non-empty.
+    return Response({"message": "OTP verified", "email": email}, status=200)
+
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def getOtherUserProfileInfo(request):
