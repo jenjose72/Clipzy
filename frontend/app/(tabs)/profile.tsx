@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Button, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, Button, TouchableOpacity, ActivityIndicator, StyleSheet, Image, FlatList, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/components/AuthContext';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { backendUrl } from '@/constants/Urls';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 const Profile = () => {
   const { logout } = useAuth();
@@ -46,29 +47,86 @@ const Profile = () => {
     router.replace('/(auth)/login');
   };
 
+  const screenWidth = Dimensions.get('window').width;
+  const gridPadding = 16;
+  const colCount = 3;
+  const itemSize = Math.floor((screenWidth - gridPadding * 2) / colCount);
+
+  const gridItems = Array.from({ length: 12 }).map((_, i) => ({ id: String(i), type: i === 0 ? 'add' : i % 4 === 0 ? 'video' : 'image' }));
+
+  const renderItem = ({ item }: { item: { id: string; type: string } }) => {
+    if (item.type === 'add') {
+      return (
+        <TouchableOpacity style={[styles.gridItem, { width: itemSize, height: itemSize, justifyContent: 'center', alignItems: 'center' }]} onPress={() => router.push('/(tabs)/upload')}>
+          <View style={styles.addCircle}><Text style={{ fontSize: 36, color: '#111' }}>+</Text></View>
+        </TouchableOpacity>
+      );
+    }
+
+    return (
+      <View style={[styles.gridItem, { width: itemSize, height: itemSize }]}> 
+        <View style={[styles.thumbPlaceholder, item.type === 'video' ? { backgroundColor: '#e6d0d0' } : { backgroundColor: '#e6eef9' }]} />
+        {item.type === 'video' && (
+          <View style={styles.playOverlay}>
+            <MaterialIcons name="play-arrow" size={28} color="white" />
+          </View>
+        )}
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
-        <Text style={styles.title}>Profile</Text>
-        {loading ? (
-          <ActivityIndicator size="large" color="#4F8EF7" />
-        ) : error ? (
-          <Text style={styles.error}>{error}</Text>
-        ) : profile ? (
-          <View style={styles.card}>
-            <Text style={styles.label}>Username: <Text style={styles.value}>{profile.username}</Text></Text>
-            <Text style={styles.label}>Name: <Text style={styles.value}>{profile.name}</Text></Text>
-            <Text style={styles.label}>Email: <Text style={styles.value}>{profile.email}</Text></Text>
-            <Text style={styles.label}>Date of Birth: <Text style={styles.value}>{profile.dob}</Text></Text>
-            <Text style={styles.label}>Followers <Text style={styles.value}>{profile.followers}</Text></Text>
-            <Text style={styles.label}>Following: <Text style={styles.value}>{profile.following}</Text></Text>
-          </View>
-        ) : null}
-        <Button title="Logout" onPress={handleLogout} />
-        <TouchableOpacity style={styles.uploadBtn} onPress={() => router.push('/(tabs)/upload')}>
-          <Text style={styles.uploadText}>Go to Upload</Text>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.push('/(tabs)/settings')} style={styles.leftIcon}>
+          <MaterialIcons name="settings" size={24} color="#111" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>CLIPZY</Text>
+        <TouchableOpacity style={styles.leftIcon} onPress={handleLogout}>
+          <MaterialIcons name="logout" size={22} color="#111" />
         </TouchableOpacity>
       </View>
+
+      <View style={styles.profileRow}>
+        <View style={styles.leftCol}>
+          <View style={styles.avatarWrap}>
+            <View style={styles.avatarCircle} />
+          </View>
+          <TouchableOpacity style={styles.editBtn} onPress={() => router.push('/(tabs)/edit-profile')}>
+            <Text style={styles.editBtnText}>Edit Profile</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.rightCol}>
+          <View style={styles.bioBox}>
+            <Text style={{ color: '#111' }}>{profile?.bio || 'the one who chases a million hoes ends up with no \"O\'s\"'}</Text>
+          </View>
+
+          <View style={styles.followRow}>
+            <View style={styles.followItem}><Text style={styles.followNum}>{profile?.followers ?? 10}</Text><Text style={styles.followLabel}>followers</Text></View>
+            <View style={styles.followItem}><Text style={styles.followNum}>{profile?.following ?? 6}</Text><Text style={styles.followLabel}>following</Text></View>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.tabRow}>
+        <TouchableOpacity style={[styles.tabButton, styles.tabActive]}>
+          <MaterialIcons name="grid-on" size={20} color="#111" />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.tabButton}>
+          <MaterialIcons name="play-circle-outline" size={20} color="#111" />
+        </TouchableOpacity>
+      </View>
+
+      <FlatList
+        data={gridItems}
+        keyExtractor={(it) => it.id}
+        renderItem={renderItem}
+        numColumns={colCount}
+        contentContainerStyle={{ padding: gridPadding }}
+        columnWrapperStyle={{ justifyContent: 'space-between', marginBottom: 6 }}
+        showsVerticalScrollIndicator={false}
+      />
     </SafeAreaView>
   );
 };
@@ -78,6 +136,141 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F5F6FA',
   },
+  // header
+  header: {
+    height: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    borderBottomWidth: 0.5,
+    borderBottomColor: '#eee',
+  },
+  leftIcon: {
+    width: 40,
+    alignItems: 'flex-start',
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: 2,
+  },
+
+  profileRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingTop: 18,
+  },
+  leftCol: {
+    width: 120,
+    alignItems: 'center',
+  },
+  rightCol: {
+    flex: 1,
+    paddingLeft: 12,
+    justifyContent: 'flex-start',
+  },
+  avatarWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#2d7bf6',
+    borderWidth: 2,
+    borderColor: '#000',
+  },
+  editBtn: {
+    marginTop: 8,
+    backgroundColor: '#1E90FF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  editBtnText: {
+    color: 'white',
+    fontWeight: '700',
+  },
+
+  bioBox: {
+    backgroundColor: '#dbdadaff',
+    padding: 10,
+    borderRadius: 8,
+    minHeight: 48,
+    justifyContent: 'center',
+  },
+  followRow: {
+    flexDirection: 'row',
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  followItem: {
+    marginRight: 18,
+    alignItems: 'center',
+  },
+  followNum: {
+    fontWeight: '800',
+    fontSize: 20,
+  },
+  followLabel: {
+    fontSize: 15,
+    color: '#777',
+  },
+
+  tabRow: {
+    flexDirection: 'row',
+    marginTop: 18,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    justifyContent: 'flex-start',
+  },
+  tabButton: {
+    padding: 8,
+    marginRight: 12,
+    borderRadius: 8,
+  },
+  tabActive: {
+    backgroundColor: '#e9d7d7',
+  },
+
+  gridItem: {
+    marginBottom: 6,
+    borderRadius: 6,
+    overflow: 'hidden',
+    backgroundColor: '#fff',
+  },
+  addCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderWidth: 2,
+    borderColor: '#ccc',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+  },
+  thumbPlaceholder: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
+  playOverlay: {
+    position: 'absolute',
+    right: 6,
+    bottom: 6,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    width: 34,
+    height: 34,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  // legacy styles kept
   container: {
     flex: 1,
     alignItems: 'center',

@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny,IsAuthenticated
 from rest_framework.response import Response
-from .models import Follows, Clip, Like
+from .models import Follows, Clip, Like,Comment
 
 # Create your views here.
 @api_view(['GET'])
@@ -69,12 +69,14 @@ def unfollowUser(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def getLikes(request):
-    user = request.user
-    videoId = request.data.get('videoId')
+    videoId = request.GET.get('videoId')
     if not videoId:
         return Response({'error': 'videoId is required.'}, status=400)
-    liked_videos = list(user.likes.filter(clip_id=videoId).values_list('clip_id', flat=True))
-    return Response({'liked_videos': liked_videos}, status=200)
+    try:
+        video = Clip.objects.get(id=videoId)
+    except Clip.DoesNotExist:
+        return Response({'error': 'Video not found.'}, status=404)
+    return Response({'likesCount': video.likeCount}, status=200)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -87,10 +89,69 @@ def likeVideo(request):
         return Response({'message': 'Video already liked.'}, status=200)
     try:
         video = Clip.objects.get(id=video_id)
-        video.likeCount += 1
-        video.save()
     except Clip.DoesNotExist:
         return Response({'error': 'Video not found.'}, status=404)
     Like.objects.create(user=user, clip=video)
+    video.likeCount = Like.objects.filter(clip=video).count()
+    video.save()
     return Response({'message': 'Video liked.'}, status=201)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def unlikeVideo(request):
+    user = request.user
+    video_id = request.data.get('video_id')
+    if not video_id:
+        return Response({'error': 'video_id is required.'}, status=400)
+    try:
+        video = Clip.objects.get(id=video_id)
+    except Clip.DoesNotExist:
+        return Response({'error': 'Video not found.'}, status=404)
+    like_instance = Like.objects.filter(user=user, clip=video)
+    if not like_instance.exists():
+        return Response({'message': 'Video not liked yet.'}, status=200)
+    like_instance.delete()
+    video.likeCount = Like.objects.filter(clip=video).count()
+    video.save()
+    return Response({'message': 'Video unliked.'}, status=200)  
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def addComment(request):
+    user = request.user
+    video_id = request.data.get('video_id')
+    content = request.data.get('content', '').strip()
+    if not video_id or not content:
+        return Response({'error': 'Both video_id and content are required.'}, status=400)
+    try:
+        video = Clip.objects.get(id=video_id)
+    except Clip.DoesNotExist:
+        return Response({'error': 'Video not found.'}, status=404)
+    comment = Comment.objects.create(user=user, clip=video, comment=content)
+    return Response({
+        'message': 'Comment added.',
+        'comment': {
+            'id': comment.id,
+            'user': user.username,
+            'comment': comment.comment,
+            'created_at': comment.created_at
+        }
+    }, status=201)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def removeComment(request):
+    user = request.user
+    comment_id = request.data.get('comment_id')
+    if not comment_id:
+        return Response({'error': 'comment_id is required.'}, status=400)
+    try:
+        comment = Comment.objects.get(id=comment_id, user=user)
+    except Comment.DoesNotExist:
+        return Response({'error': 'Comment not found or access denied.'}, status=404)
+    comment.delete()
+    return Response({'message': 'Comment removed.'}, status=200)
+
+
+
 
