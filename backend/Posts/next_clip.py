@@ -19,7 +19,7 @@ def clips(data):
     clip_link = "Temp"
     return clip_link
 
-def next_clip():
+def next_clip(user_data):
     functions = ['Metadata','Trending','Model']
     weights = [0.5,0.3,0.2]
 
