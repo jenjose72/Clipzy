@@ -9,8 +9,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function Login() {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('test');
+  const [password, setPassword] = useState('password@123');
   const [error, setError] = useState('');
   const router = useRouter();
   const { login } = useAuth();

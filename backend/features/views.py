@@ -1,9 +1,13 @@
-
 from django.contrib.auth.models import User
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny,IsAuthenticated
 from rest_framework.response import Response
 from .models import Follows, Clip, Like,Comment
+from .video_classification import extract_frames, encode_image, classify_frame, aggregate_labels
+import os
+
+from django.core.files.storage import default_storage
+from django.core.files.base import ContentFile
 
 # Create your views here.
 @api_view(['GET'])
@@ -152,6 +156,66 @@ def removeComment(request):
     comment.delete()
     return Response({'message': 'Comment removed.'}, status=200)
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def getComments(request):
+    videoId = request.GET.get('videoId')
+    if not videoId:
+        return Response({'error': 'videoId is required.'}, status=400)
+    try:
+        video = Clip.objects.get(id=videoId)
+    except Clip.DoesNotExist:
+        return Response({'error': 'Video not found.'}, status=404)
+    comments = Comment.objects.filter(clip=video).order_by('-created_at')
+    comments_data = [
+        {
+            'id': comment.id,
+            'user': comment.user.username,
+            'comment': comment.comment,
+            'created_at': comment.created_at
+        }
+        for comment in comments
+    ]
+    return Response({'comments': comments_data}, status=200)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def postClip(request):
+    user = request.user
+    video_url = request.POST.get('video_url')
+    description = request.POST.get('description', '').strip()
+    video_file = request.FILES.get('file')
+    if not video_url:
+        return Response({'error': 'video_url is required.'}, status=400)
+    # Save the video file temporarily if present
+    temp_path = None
+    if video_file:
+        temp_path = default_storage.save(f'temp_uploads/{video_file.name}', ContentFile(video_file.read()))
+        temp_full_path = default_storage.path(temp_path)
+        # Run classification pipeline
+        try:
+            frames = extract_frames(temp_full_path, every_n_frames=60)
+            frame_labels = [classify_frame(f) for f in frames[:5]]
+            final_labels = aggregate_labels(frame_labels)
+        except Exception as e:
+            final_labels = []
+        # Optionally, delete the temp file after processing
+        try:
+            os.remove(temp_full_path)
+        except Exception:
+            pass
+    else:
+        final_labels = []
+    clip = Clip.objects.create(caption=description, clipUrl=video_url)
+    # Tagging logic for categories
+    from .models import VideoCategory, TaggedVideo
+    for label, _ in final_labels:
+        category_obj, created = VideoCategory.objects.get_or_create(name=label)
+        TaggedVideo.objects.create(clip=clip, category=category_obj)
+    return Response({
+        'message': 'Clip posted successfully.',
+        'labels': final_labels,
+    })
 
 
 

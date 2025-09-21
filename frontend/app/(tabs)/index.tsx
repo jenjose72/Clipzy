@@ -1,10 +1,11 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { StyleSheet, View, Dimensions, TouchableWithoutFeedback, FlatList, TouchableOpacity, SafeAreaView } from 'react-native';
+import { StyleSheet, View, Dimensions, TouchableWithoutFeedback, FlatList, TouchableOpacity, SafeAreaView, Modal, TextInput, KeyboardAvoidingView, Platform, Alert, Text } from 'react-native';
 import { useAuth } from '@/components/AuthContext';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
-import { Ionicons, FontAwesome } from '@expo/vector-icons';
+import { Ionicons, FontAwesome, Fontisto, Feather } from '@expo/vector-icons';
+import { backendUrl } from '@/constants/Urls';
 
 const VIDEO_URLS = [
   'https://res.cloudinary.com/dwnhpd6oe/video/upload/v1751370063/myjjzwprprwgjx6zvsuf.mp4',
@@ -20,6 +21,11 @@ export default function HomeScreen() {
   const [playingIndex, setPlayingIndex] = useState(0);
   const [progressArr, setProgressArr] = useState<number[]>(VIDEO_URLS.map(() => 0));
   const [isPlayingArr, setIsPlayingArr] = useState<boolean[]>(VIDEO_URLS.map((_, i) => i === 0));
+  const [likedArr, setLikedArr] = useState<boolean[]>(VIDEO_URLS.map(() => false));
+  const [commentModalVisible, setCommentModalVisible] = useState(false);
+  const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
+  const [comments, setComments] = useState<any[]>([]);
+  const [newComment, setNewComment] = useState('');
 
   useEffect(() => {
     if (!user) {
@@ -41,6 +47,75 @@ export default function HomeScreen() {
         await ref.playAsync();
       }
       setIsPlayingArr(arr => arr.map((v, i) => (i === index ? !v : v)));
+    }
+  };
+
+  const handleLike = (index: number) => {
+    setLikedArr(arr => arr.map((v, i) => (i === index ? !v : v)));
+  };
+
+  const handleCommentPress = (index: number) => {
+    setCurrentVideoIndex(index);
+    setCommentModalVisible(true);
+    fetchComments(index);
+  };
+
+  const fetchComments = async (videoIndex: number) => {
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) return;
+
+      // For now, we'll use a dummy video ID since we don't have real video IDs
+      // In a real app, you'd have video IDs from your backend
+      const videoId = videoIndex + 1; // Dummy ID
+
+      const response = await fetch(`${backendUrl}/features/getComments/?videoId=${videoId}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setComments(data.comments || []);
+      }
+    } catch (error) {
+      console.error('Error fetching comments:', error);
+    }
+  };
+
+  const handleAddComment = async () => {
+    if (!newComment.trim()) return;
+
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) return;
+
+      const videoId = currentVideoIndex + 1; // Dummy ID
+
+      const response = await fetch(`${backendUrl}/features/addComment/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          video_id: videoId,
+          content: newComment.trim(),
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setComments(prev => [data.comment, ...prev]);
+        setNewComment('');
+      } else {
+        Alert.alert('Error', 'Failed to add comment');
+      }
+    } catch (error) {
+      console.error('Error adding comment:', error);
+      Alert.alert('Error', 'Failed to add comment');
     }
   };
 
@@ -97,14 +172,14 @@ export default function HomeScreen() {
         <View style={[styles.progressBarFill, { width: `${progressArr[index] * 100}%` }]} />
       </View>
       <SafeAreaView style={styles.featureButtonsContainer}>
-        <TouchableOpacity style={styles.featureButton}>
-          <Ionicons name="heart" size={28} color="white" />
+                <TouchableOpacity style={styles.featureButton} onPress={() => handleLike(index)}>
+          <Ionicons name={likedArr[index] ? "heart" : "heart-outline"} size={32} color={likedArr[index] ? "#E91E63" : "white"} />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.featureButton} onPress={() => handleCommentPress(index)}>
+          <Fontisto name="comment" size={24} color="white" />
         </TouchableOpacity>
         <TouchableOpacity style={styles.featureButton}>
-          <FontAwesome name="comment" size={28} color="white" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.featureButton}>
-          <Ionicons name="share-social" size={28} color="white" />
+          <Feather name="share" size={28} color="white" />
         </TouchableOpacity>
       </SafeAreaView>
     </View>
@@ -124,6 +199,73 @@ export default function HomeScreen() {
         viewabilityConfig={viewConfigRef.current}
         style={{ flex: 1 }}
       />
+
+      {/* Comment Modal */}
+      <Modal
+        visible={commentModalVisible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setCommentModalVisible(false)}
+      >
+        <KeyboardAvoidingView 
+          style={styles.commentModalContainer}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.commentHeader}>
+            <TouchableOpacity onPress={() => setCommentModalVisible(false)}>
+              <Ionicons name="close" size={24} color="white" />
+            </TouchableOpacity>
+            <Text style={styles.commentTitle}>Comments</Text>
+            <View style={{ width: 24 }} />
+          </View>
+
+          <FlatList
+            data={comments}
+            keyExtractor={(item) => item.id.toString()}
+            renderItem={({ item }) => (
+              <View style={styles.commentItem}>
+                <View style={styles.commentAvatar}>
+                  <Text style={styles.commentAvatarText}>
+                    {item.user.charAt(0).toUpperCase()}
+                  </Text>
+                </View>
+                <View style={styles.commentContent}>
+                  <Text style={styles.commentUsername}>{item.user}</Text>
+                  <Text style={styles.commentText}>{item.comment}</Text>
+                  <Text style={styles.commentTime}>
+                    {new Date(item.created_at).toLocaleDateString()}
+                  </Text>
+                </View>
+              </View>
+            )}
+            style={styles.commentsList}
+            contentContainerStyle={comments.length === 0 && styles.emptyComments}
+            ListEmptyComponent={
+              <Text style={styles.emptyCommentsText}>No comments yet. Be the first to comment!</Text>
+            }
+          />
+
+          <View style={styles.commentInputContainer}>
+            <TextInput
+              style={styles.commentInput}
+              placeholder="Add a comment..."
+              placeholderTextColor="#666"
+              value={newComment}
+              onChangeText={setNewComment}
+              multiline
+            />
+            <TouchableOpacity 
+              style={[styles.postButton, !newComment.trim() && styles.postButtonDisabled]}
+              onPress={handleAddComment}
+              disabled={!newComment.trim()}
+            >
+              <Text style={[styles.postButtonText, !newComment.trim() && styles.postButtonTextDisabled]}>
+                Post
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -156,23 +298,18 @@ const styles = StyleSheet.create({
   },
   featureButtonsContainer: {
     position: 'absolute',
-    right: 20,
+    right: 5,
     bottom: 100,
     alignItems: 'center',
   },
   featureButton: {
     marginBottom: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
     borderRadius: 30,
     width: 60,
     height: 60,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.8,
-    shadowRadius: 4,
-    elevation: 5,
+ 
   },
   logoutContainer: {
     position: 'absolute',
@@ -190,5 +327,113 @@ const styles = StyleSheet.create({
     height: 10,
     backgroundColor: '#000',
     borderRadius: 5,
+  },
+  commentModalContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  commentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  commentTitle: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  commentsList: {
+    flex: 1,
+  },
+  emptyComments: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyCommentsText: {
+    color: '#666',
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  commentItem: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#222',
+  },
+  commentAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#333',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  commentAvatarText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  commentContent: {
+    flex: 1,
+  },
+  commentUsername: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  commentText: {
+    color: 'white',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 4,
+  },
+  commentTime: {
+    color: '#666',
+    fontSize: 12,
+  },
+  commentInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+    backgroundColor: '#111',
+  },
+  commentInput: {
+    flex: 1,
+    backgroundColor: '#222',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    color: 'white',
+    fontSize: 14,
+    marginRight: 12,
+    maxHeight: 80,
+  },
+  postButton: {
+    backgroundColor: '#E91E63',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  postButtonDisabled: {
+    backgroundColor: '#333',
+  },
+  postButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  postButtonTextDisabled: {
+    color: '#666',
   },
 });
