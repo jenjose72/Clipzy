@@ -28,3 +28,11 @@ class Follows(models.Model):
     follower = models.ForeignKey('auth.User', related_name='following', on_delete=models.CASCADE)
     following = models.ForeignKey('auth.User', related_name='followers', on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
+
+class VideoCategory(models.Model):
+    name= models.CharField(max_length=100, unique=True)\
+    
+class TaggedVideo(models.Model):
+    clip = models.ForeignKey(Clip, related_name='tags', on_delete=models.CASCADE)
+    category = models.ForeignKey(VideoCategory, related_name='tagged_videos', on_delete=models.CASCADE)
+    created_at = models.DateTimeField(auto_now_add=True)

@@ -33,6 +33,11 @@ export default function TabLayout() {
         options={{
           title: 'Home',
           tabBarIcon: ({ color }) => <Octicons name="home" size={28} color={color} />,
+          tabBarActiveTintColor: Colors.dark.tint,
+          tabBarInactiveTintColor: Colors.dark.icon,
+          tabBarStyle: {
+            backgroundColor: '#000',
+          },
         }}
       />
       <Tabs.Screen
@@ -58,6 +63,18 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="upload"
+        options={{
+          title: 'Upload',
+          tabBarIcon: ({ color }) => <IconSymbol name="plus" size={28} color={color} />,
+          
+         }}
+      />
+       <Tabs.Screen
+        name="userProfile"
+        options={{ href: null }}
+      />
+       <Tabs.Screen
+        name="chatRoom/[roomId]"
         options={{ href: null }}
       />
     </Tabs>
