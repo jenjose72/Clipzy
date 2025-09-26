@@ -70,6 +70,14 @@ export default function TabLayout() {
          }}
       />
        <Tabs.Screen
+        name="chatRoom"
+        options={{ href: null }}
+      />
+       <Tabs.Screen
+        name="[roomId]"
+        options={{ href: null }}
+      />
+       <Tabs.Screen
         name="userProfile"
         options={{ href: null }}
       />

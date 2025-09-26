@@ -217,5 +217,22 @@ def postClip(request):
         'labels': final_labels,
     })
 
-
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def fetchClips(request):
+    clips = Clip.objects.all().order_by('-created_at')
+    clips_data = []
+    for clip in clips:
+        categories = clip.tags.all().values_list('category__name', flat=True)
+        clips_data.append({
+            'id': clip.id,
+            'caption': clip.caption,
+            'clipUrl': clip.clipUrl,
+            'likeCount': clip.likeCount,
+            'created_at': clip.created_at,
+            'categories': list(categories)
+        })
+    return Response({
+        'clips': clips_data
+    })
 
