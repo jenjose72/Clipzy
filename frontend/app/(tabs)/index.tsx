@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { StyleSheet, View, Dimensions, TouchableWithoutFeedback, FlatList, TouchableOpacity, SafeAreaView, Modal, TextInput, KeyboardAvoidingView, Platform, Alert, Text, Animated, Easing } from 'react-native';
+import { StyleSheet, View, Dimensions, TouchableWithoutFeedback, FlatList, TouchableOpacity, SafeAreaView, Modal, TextInput, KeyboardAvoidingView, Platform, Alert, Text, Animated, Easing, RefreshControl } from 'react-native';
 import { useAuth } from '@/components/AuthContext';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -10,6 +10,8 @@ import { backendUrl } from '@/constants/Urls';
 const { width, height } = Dimensions.get('window');
 
 export default function HomeScreen() {
+  console.log('🏠 HomeScreen component rendered');
+
   const { user, logout } = useAuth();
   const router = useRouter();
   const videoRefs = useRef<(Video | null)[]>([]);
@@ -26,22 +28,51 @@ export default function HomeScreen() {
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const [videoMetrics, setVideoMetrics] = useState<any[]>([]);
 
   useEffect(() => {
     if (!user) {
       router.replace('/(auth)');
     } else {
-      fetchClips();
+      fetchClips(false);
       fetchNewCreatorsClips();
     }
 
     // Cleanup intervals on unmount
     return () => {
+      // Track final watch percentage for current video before unmounting
+      if (playingIndex >= 0) {
+        const currentVideoRef = videoRefs.current[playingIndex];
+        const currentClips = getCurrentClips();
+        if (currentVideoRef && currentClips[playingIndex]) {
+          currentVideoRef.getStatusAsync().then(status => {
+            if (status.isLoaded && status.durationMillis && status.durationMillis > 0) {
+              const finalProgress = (status.positionMillis || 0) / status.durationMillis;
+              const currentVideoId = currentClips[playingIndex]?.id;
+              if (currentVideoId && finalProgress > 0) {
+                console.log(`🎬 Final watch percentage on unmount for video ${currentVideoId}: ${Math.round(finalProgress * 100)}%`);
+                trackWatchPercentage(currentVideoId, finalProgress);
+              }
+            }
+          }).catch(error => {
+            console.error('Error getting final status on unmount:', error);
+          });
+        }
+      }
+
       progressUpdateIntervals.current.forEach(interval => {
         if (interval) clearInterval(interval);
       });
     };
   }, [user, router]);
+
+  // Debug: Log when videoMetrics changes
+  useEffect(() => {
+    if (videoMetrics.length > 0) {
+      console.log('📈 VideoMetrics state updated:', videoMetrics);
+    }
+  }, [videoMetrics]);
 
   const getCurrentClips = () => {
     return selectedPage === 'forYou' ? clips : newCreatorsClips;
@@ -56,6 +87,26 @@ export default function HomeScreen() {
   };
 
   const handlePageSwitch = (page: 'forYou' | 'newCreators') => {
+    // Track final watch percentage for current video before switching pages
+    if (playingIndex >= 0) {
+      const currentVideoRef = videoRefs.current[playingIndex];
+      const currentClips = getCurrentClips();
+      if (currentVideoRef && currentClips[playingIndex]) {
+        currentVideoRef.getStatusAsync().then(status => {
+          if (status.isLoaded && status.durationMillis && status.durationMillis > 0) {
+            const finalProgress = (status.positionMillis || 0) / status.durationMillis;
+            const currentVideoId = currentClips[playingIndex]?.id;
+            if (currentVideoId && finalProgress > 0) {
+              console.log(`🎬 Final watch percentage on page switch for video ${currentVideoId}: ${Math.round(finalProgress * 100)}%`);
+              trackWatchPercentage(currentVideoId, finalProgress);
+            }
+          }
+        }).catch(error => {
+          console.error('Error getting final status on page switch:', error);
+        });
+      }
+    }
+
     setSelectedPage(page);
     const currentClips = page === 'forYou' ? clips : newCreatorsClips;
     initializeProgressForPage(currentClips);
@@ -66,7 +117,7 @@ export default function HomeScreen() {
     progressUpdateIntervals.current = [];
   };
 
-  const fetchClips = async () => {
+  const fetchClips = async (isRefresh = false) => {
     try {
       const token = await AsyncStorage.getItem('accessToken');
       const response = await fetch(`${backendUrl}/features/fetchClips/`, {
@@ -79,6 +130,14 @@ export default function HomeScreen() {
       if (response.ok) {
         const data = await response.json();
         setClips(data.clips || []);
+        console.log(data.clips);
+        
+        // Initialize metrics for new videos
+        (data.clips || []).forEach((clip: any) => {
+          console.log('🎬 Initializing metrics for video:', clip.id, 'categories:', clip.categories);
+          updateVideoMetrics(clip.id, { categories: clip.categories || [] });
+        });
+        
         // Initialize arrays based on the number of clips
         const clipCount = data.clips?.length || 0;
         progressAnimations.current = new Array(clipCount).fill(null).map(() => new Animated.Value(0));
@@ -91,7 +150,9 @@ export default function HomeScreen() {
       console.error('Error fetching clips:', error);
       Alert.alert('Error', 'Failed to fetch videos');
     } finally {
-      setLoading(false);
+      if (!isRefresh) {
+        setLoading(false);
+      }
     }
   };
 
@@ -113,6 +174,12 @@ export default function HomeScreen() {
         // In a real app, you'd have different logic to fetch new creators' content
         const reversedClips = (data.clips || []).reverse();
         setNewCreatorsClips(reversedClips);
+        
+        // Initialize metrics for new creator videos
+        reversedClips.forEach((clip: any) => {
+          console.log('🎬 Initializing metrics for new creator video:', clip.id, 'categories:', clip.categories);
+          updateVideoMetrics(clip.id, { categories: clip.categories || [] });
+        });
       } else {
         Alert.alert('Error', 'Failed to fetch new creators videos');
       }
@@ -122,13 +189,97 @@ export default function HomeScreen() {
     }
   };
 
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      // Send video metrics to backend before refreshing
+      if (videoMetrics.length > 0) {
+        console.log('📤 Sending video metrics to backend...');
+        const token = await AsyncStorage.getItem('accessToken');
+        const response = await fetch(`${backendUrl}/posts/sendVideoMetrics/`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            metrics: videoMetrics
+          }),
+        });
+
+        if (response.ok) {
+          console.log('✅ Video metrics sent successfully');
+          // Clear metrics after successful send
+          setVideoMetrics([]);
+        } else {
+          console.error('❌ Failed to send video metrics');
+        }
+      }
+
+      await Promise.all([fetchClips(true), fetchNewCreatorsClips()]);
+    } catch (error) {
+      console.error('Error refreshing videos:', error);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  // Video Metrics Tracking
+  const updateVideoMetrics = (videoId: string, updates: any) => {
+    console.log('🔄 Updating metrics for video:', videoId, 'with updates:', updates);
+    setVideoMetrics(prev => {
+      const existingIndex = prev.findIndex(metric => metric.videoId === videoId);
+      const currentClips = getCurrentClips();
+      const videoData = currentClips.find(clip => clip.id === videoId);
+
+      const metricData = {
+        videoId,
+        categories: videoData?.categories || [],
+        watchPercentage: 0,
+        liked: false,
+        commented: false,
+        ...updates
+      };
+
+      let newMetrics;
+      if (existingIndex >= 0) {
+        // Update existing metric
+        newMetrics = [...prev];
+        newMetrics[existingIndex] = { ...newMetrics[existingIndex], ...updates };
+      } else {
+        // Add new metric, keep only last 5
+        newMetrics = [...prev, metricData].slice(-5);
+      }
+
+      console.log('📊 Video Metrics (last 5 videos):', JSON.stringify(newMetrics, null, 2));
+      return newMetrics;
+    });
+  };
+
+  const trackWatchPercentage = (videoId: string, percentage: number) => {
+    console.log('👀 Tracking watch percentage:', videoId, Math.round(percentage * 100) + '%');
+    updateVideoMetrics(videoId, { watchPercentage: Math.round(percentage * 100) });
+  };
+
+  const trackLike = (videoId: string, liked: boolean) => {
+    console.log('❤️ Tracking like:', videoId, liked ? 'liked' : 'unliked');
+    updateVideoMetrics(videoId, { liked });
+  };
+
+  const trackComment = (videoId: string) => {
+    console.log('💬 Tracking comment:', videoId);
+    updateVideoMetrics(videoId, { commented: true });
+  };
+
   const startProgressUpdates = (index: number) => {
     // Clear any existing interval for this video
     if (progressUpdateIntervals.current[index]) {
       clearInterval(progressUpdateIntervals.current[index]);
     }
 
-    // Start new interval that updates at ~60fps
+    let lastTrackedPercentage = 0;
+
+    // Start new interval that updates every second (instead of 60fps)
     progressUpdateIntervals.current[index] = setInterval(async () => {
       const videoRef = videoRefs.current[index];
       if (videoRef && progressAnimations.current[index]) {
@@ -137,12 +288,23 @@ export default function HomeScreen() {
           if (status.isLoaded && status.durationMillis && status.durationMillis > 0) {
             const progress = (status.positionMillis || 0) / status.durationMillis;
             progressAnimations.current[index].setValue(progress);
+
+            // Track watch percentage only when it changes significantly (every 10% or more)
+            const currentPercentage = Math.round(progress * 100);
+            if (Math.abs(currentPercentage - lastTrackedPercentage) >= 10) {
+              const currentClips = getCurrentClips();
+              const videoId = currentClips[index]?.id;
+              if (videoId) {
+                trackWatchPercentage(videoId, progress);
+                lastTrackedPercentage = currentPercentage;
+              }
+            }
           }
         } catch (error) {
           // Silently handle errors
         }
       }
-    }, 16) as any; // ~60fps updates
+    }, 1000) as any; // Update every second instead of every 16ms
   };
 
   const stopProgressUpdates = (index: number) => {
@@ -168,6 +330,14 @@ export default function HomeScreen() {
 
   const handleLike = (index: number) => {
     setLikedArr(arr => arr.map((v, i) => (i === index ? !v : v)));
+    
+    // Track like action
+    const currentClips = getCurrentClips();
+    const videoId = currentClips[index]?.id;
+    const newLikedState = !likedArr[index];
+    if (videoId) {
+      trackLike(videoId, newLikedState);
+    }
   };
 
   const handleCommentPress = (index: number) => {
@@ -226,6 +396,12 @@ export default function HomeScreen() {
         const data = await response.json();
         setComments(prev => [data.comment, ...prev]);
         setNewComment('');
+
+        // Track comment action
+        const videoId = clips[currentVideoIndex]?.id;
+        if (videoId) {
+          trackComment(videoId);
+        }
       } else {
         Alert.alert('Error', 'Failed to add comment');
       }
@@ -237,35 +413,67 @@ export default function HomeScreen() {
 
   const onViewableItemsChanged = React.useRef(({ viewableItems }: any) => {
     if (viewableItems.length > 0) {
-      const index = viewableItems[0].index;
-      setPlayingIndex(index);
-      setIsPlayingArr(arr => arr.map((_, i) => i === index));
-      // Reset progress for the new video
-      if (progressAnimations.current[index]) {
-        progressAnimations.current[index].setValue(0);
-      }
-      // Start progress updates for the visible video
-      startProgressUpdates(index);
-      // Stop progress updates for all other videos
-      progressUpdateIntervals.current.forEach((_, i) => {
-        if (i !== index) {
-          stopProgressUpdates(i);
-        }
+      // Find the item with the highest visibility percentage
+      const mostVisibleItem = viewableItems.reduce((prev: any, current: any) => {
+        return (prev.isViewable && current.isViewable && current.itemVisiblePercent > prev.itemVisiblePercent) ? current : prev;
       });
-      // Pause all except the one in view
-      videoRefs.current.forEach((ref, i) => {
-        if (ref) {
-          if (i === index) {
-            ref.playAsync();
-          } else {
-            ref.pauseAsync();
+
+      const newIndex = mostVisibleItem.index;
+      const currentClips = getCurrentClips();
+
+      // Only proceed if this is a different video
+      if (newIndex !== playingIndex) {
+        // Track final watch percentage for the previous video before switching
+        if (playingIndex >= 0) {
+          const prevVideoRef = videoRefs.current[playingIndex];
+          if (prevVideoRef) {
+            prevVideoRef.getStatusAsync().then(status => {
+              if (status.isLoaded && status.durationMillis && status.durationMillis > 0) {
+                const finalProgress = (status.positionMillis || 0) / status.durationMillis;
+                const prevVideoId = currentClips[playingIndex]?.id;
+                if (prevVideoId && finalProgress > 0) {
+                  console.log(`🎬 Final watch percentage for video ${prevVideoId}: ${Math.round(finalProgress * 100)}%`);
+                  trackWatchPercentage(prevVideoId, finalProgress);
+                }
+              }
+            }).catch(error => {
+              console.error('Error getting final status:', error);
+            });
           }
         }
-      });
+
+        setPlayingIndex(newIndex);
+        setIsPlayingArr(arr => arr.map((_, i) => i === newIndex));
+        // Reset progress for the new video
+        if (progressAnimations.current[newIndex]) {
+          progressAnimations.current[newIndex].setValue(0);
+        }
+        // Start progress updates for the visible video
+        startProgressUpdates(newIndex);
+        // Stop progress updates for all other videos
+        progressUpdateIntervals.current.forEach((_, i) => {
+          if (i !== newIndex) {
+            stopProgressUpdates(i);
+          }
+        });
+        // Pause all except the one in view
+        videoRefs.current.forEach((ref, i) => {
+          if (ref) {
+            if (i === newIndex) {
+              ref.playAsync();
+            } else {
+              ref.pauseAsync();
+            }
+          }
+        });
+      }
     }
   });
 
-  const viewConfigRef = React.useRef({ viewAreaCoveragePercentThreshold: 80 });
+  const viewConfigRef = React.useRef({ 
+    viewAreaCoveragePercentThreshold: 50, // Lower threshold for better detection
+    minimumViewTime: 100 // Minimum time before considering viewable
+  });
 
   const renderItem = ({ item, index }: { item: any; index: number }) => {
     const animatedWidth = progressAnimations.current[index]?.interpolate({
@@ -320,7 +528,7 @@ export default function HomeScreen() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#000' }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#000' }}>
       <FlatList
         data={getCurrentClips()}
         renderItem={renderItem}
@@ -330,6 +538,18 @@ export default function HomeScreen() {
         onViewableItemsChanged={onViewableItemsChanged.current}
         viewabilityConfig={viewConfigRef.current}
         style={{ flex: 1 }}
+        snapToAlignment="start"
+        snapToInterval={height} // Snap to full screen height
+        decelerationRate="fast" // Faster deceleration for snappier feel
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#fff"
+            colors={['#fff']}
+            progressBackgroundColor="#333"
+          />
+        }
       />
 
       {/* Page Selector Overlay */}
@@ -418,26 +638,26 @@ export default function HomeScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   videoContainer: {
     width: width,
-    height: height - 50, // Adjust height to account for bottom navbar
+    height: height, // Use full screen height for proper paging
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#000',
   },
   video: {
     width: width,
-    height: height - 50, // Adjust height to match container
+    height: height, // Use full screen height
     backgroundColor: '#000',
   },
   progressBarBg: {
     position: 'absolute',
-    bottom: 60, // Position above the bottom navbar (50px navbar + 10px padding)
+    bottom: 110, // Position above the bottom safe area and navbar
     left: 0,
     right: 0,
     height: 6,
@@ -454,7 +674,7 @@ const styles = StyleSheet.create({
   featureButtonsContainer: {
     position: 'absolute',
     right: 5,
-    bottom: 100,
+    bottom: 150, // Adjust for full screen height
     alignItems: 'center',
   },
   featureButton: {
@@ -468,7 +688,7 @@ const styles = StyleSheet.create({
   },
   captionContainer: {
     position: 'absolute',
-    bottom: 160,
+    bottom: 210, // Adjust for full screen height
     left: 16,
     right: 80,
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
@@ -512,7 +732,7 @@ const styles = StyleSheet.create({
   },
   pageSelectorOverlay: {
     position: 'absolute',
-    top: Platform.OS === 'ios' ? 60 : 30, // Position below status bar
+    top: 10, // Adjust for SafeAreaView
     left: 0,
     right: 0,
     flexDirection: 'row',

@@ -30,7 +30,7 @@ SECRET_KEY = 'django-insecure-mdh(qoto4wxko=n$rg6ykoyuv4qyy(4j=)ln8n6u875p!*x@k+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['10.0.2.2', '127.0.0.1', 'localhost','172.16.204.240']
+ALLOWED_HOSTS = ['10.0.2.2', '127.0.0.1', 'localhost','172.16.204.240','192.168.1.2']
 
 
 REST_FRAMEWORK = {
@@ -62,7 +62,7 @@ INSTALLED_APPS = [
     "channels",
     "chat",
     'features',
-    'posts',
+    'Posts',
 ]
 
 ASGI_APPLICATION = "backend.asgi.application"
