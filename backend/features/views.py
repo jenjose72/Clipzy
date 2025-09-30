@@ -193,10 +193,14 @@ def postClip(request):
         temp_path = default_storage.save(f'temp_uploads/{video_file.name}', ContentFile(video_file.read()))
         temp_full_path = default_storage.path(temp_path)
         # Run classification pipeline
+        print("Here")
         try:
+            print("Here22")
             frames = extract_frames(temp_full_path, every_n_frames=60)
             frame_labels = [classify_frame(f) for f in frames[:5]]
+            print(frame_labels)
             final_labels = aggregate_labels(frame_labels)
+            print("done")
         except Exception as e:
             final_labels = []
         # Optionally, delete the temp file after processing

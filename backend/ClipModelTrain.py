@@ -7,7 +7,7 @@ import pandas as pd
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.settings')
 django.setup()
-from posts.models import Metadata, UserMetadata
+from Posts.models import Metadata, UserMetadata
 from accounts.models import UserProfile
 
 def get_user_category_matrix():
