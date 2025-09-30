@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     "channels",
     "chat",
     'features',
+    'posts',
 ]
 
 ASGI_APPLICATION = "backend.asgi.application"
