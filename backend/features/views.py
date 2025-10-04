@@ -240,3 +240,23 @@ def fetchClips(request):
         'clips': clips_data
     })
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def getLikedVideos(request):
+    user = request.user
+    liked_clips = Like.objects.filter(user=user).select_related('clip')
+    liked_videos_data = []
+    for like in liked_clips:
+        clip = like.clip
+        categories = clip.tags.all().values_list('category__name', flat=True)
+        liked_videos_data.append({
+            'id': clip.id,
+            'caption': clip.caption,
+            'clipUrl': clip.clipUrl,
+            'likeCount': clip.likeCount,
+            'created_at': clip.created_at,
+            'categories': list(categories),
+            'liked_at': like.created_at
+        })
+    return Response({'liked_videos': liked_videos_data}, status=200)
+

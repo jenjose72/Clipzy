@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import searchUsers, isFollowing, fetchClips,followUser,postClip, unfollowUser,likeVideo,getLikes,unlikeVideo,addComment,removeComment,getComments
+from .views import searchUsers, isFollowing, fetchClips,followUser,postClip, unfollowUser,likeVideo,getLikes,unlikeVideo,addComment,removeComment,getComments,getLikedVideos
 
 urlpatterns = [
     path('search/', searchUsers, name='searchUsers'),
@@ -12,6 +12,7 @@ urlpatterns = [
     path('addComment/',addComment, name='addComment'),
     path('removeComment/',removeComment, name='removeComment'),
     path('getComments/',getComments, name='getComments'),
+    path('getLikedVideos/',getLikedVideos, name='getLikedVideos'),
     path('postClip/',postClip, name='postClip'),
     path('fetchClips/',fetchClips, name='fetchClips'),
 ]

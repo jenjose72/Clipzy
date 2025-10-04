@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { Ionicons, FontAwesome, Fontisto, Feather } from '@expo/vector-icons';
 import { backendUrl } from '@/constants/Urls';
+import { Snackbar } from 'react-native-paper';
 
 const { width, height } = Dimensions.get('window');
 
@@ -30,6 +31,8 @@ export default function HomeScreen() {
   const [newComment, setNewComment] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [videoMetrics, setVideoMetrics] = useState<any[]>([]);
+  const [snackbarVisible, setSnackbarVisible] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
 
   useEffect(() => {
     if (!user) {
@@ -86,7 +89,7 @@ export default function HomeScreen() {
     setPlayingIndex(0);
   };
 
-  const handlePageSwitch = (page: 'forYou' | 'newCreators') => {
+  const handlePageSwitch = async (page: 'forYou' | 'newCreators') => {
     // Track final watch percentage for current video before switching pages
     if (playingIndex >= 0) {
       const currentVideoRef = videoRefs.current[playingIndex];
@@ -115,6 +118,48 @@ export default function HomeScreen() {
       if (interval) clearInterval(interval);
     });
     progressUpdateIntervals.current = [];
+
+    // Update liked status for the new page
+    const token = await AsyncStorage.getItem('accessToken');
+    if (token) {
+      await checkLikedStatus(currentClips, page);
+    }
+  };
+
+  const checkLikedStatus = async (videos: any[], page: 'forYou' | 'newCreators') => {
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) return;
+
+      const response = await fetch(`${backendUrl}/features/getLikedVideos/`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const likedVideoIds = data.liked_videos?.map((video: any) => video.id) || [];
+        
+        // Update likedArr based on which videos are liked
+        const updateLikedArr = (arr: boolean[], videos: any[]) => 
+          arr.map((_, index) => {
+            const videoId = videos[index]?.id;
+            return likedVideoIds.includes(videoId);
+          });
+
+        if (page === 'forYou') {
+          setLikedArr(prev => updateLikedArr(prev, videos));
+        } else if (page === 'newCreators') {
+          // For newCreators, we need to handle the reversed order
+          // Since newCreatorsClips is just reversed clips, we can use the same logic
+          setLikedArr(prev => updateLikedArr(prev, videos));
+        }
+      }
+    } catch (error) {
+      console.error('Error checking liked status:', error);
+    }
   };
 
   const fetchClips = async (isRefresh = false) => {
@@ -143,6 +188,11 @@ export default function HomeScreen() {
         progressAnimations.current = new Array(clipCount).fill(null).map(() => new Animated.Value(0));
         setIsPlayingArr(new Array(clipCount).fill(false).map((_, i) => i === 0));
         setLikedArr(new Array(clipCount).fill(false));
+
+        // Check liked status for each video
+        if (token) {
+          await checkLikedStatus(data.clips || [], 'forYou');
+        }
       } else {
         Alert.alert('Error', 'Failed to fetch videos');
       }
@@ -180,6 +230,11 @@ export default function HomeScreen() {
           console.log('🎬 Initializing metrics for new creator video:', clip.id, 'categories:', clip.categories);
           updateVideoMetrics(clip.id, { categories: clip.categories || [] });
         });
+
+        // Check liked status for new creator videos
+        if (token) {
+          await checkLikedStatus(reversedClips, 'newCreators');
+        }
       } else {
         Alert.alert('Error', 'Failed to fetch new creators videos');
       }
@@ -289,9 +344,9 @@ export default function HomeScreen() {
             const progress = (status.positionMillis || 0) / status.durationMillis;
             progressAnimations.current[index].setValue(progress);
 
-            // Track watch percentage only when it changes significantly (every 10% or more)
+            // Track watch percentage only when it changes significantly (every 5% or more)
             const currentPercentage = Math.round(progress * 100);
-            if (Math.abs(currentPercentage - lastTrackedPercentage) >= 10) {
+            if (Math.abs(currentPercentage - lastTrackedPercentage) >= 5) {
               const currentClips = getCurrentClips();
               const videoId = currentClips[index]?.id;
               if (videoId) {
@@ -301,7 +356,7 @@ export default function HomeScreen() {
             }
           }
         } catch (error) {
-          // Silently handle errors
+          console.error('Error updating progress:', error);
         }
       }
     }, 1000) as any; // Update every second instead of every 16ms
@@ -328,15 +383,40 @@ export default function HomeScreen() {
     }
   };
 
-  const handleLike = (index: number) => {
-    setLikedArr(arr => arr.map((v, i) => (i === index ? !v : v)));
-    
-    // Track like action
+  const handleLike = async (index: number) => {
     const currentClips = getCurrentClips();
     const videoId = currentClips[index]?.id;
     const newLikedState = !likedArr[index];
-    if (videoId) {
-      trackLike(videoId, newLikedState);
+
+    if (!videoId) return;
+
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      if (!token) return;
+
+      const endpoint = newLikedState ? `${backendUrl}/features/addLikes/` : `${backendUrl}/features/unlikeVideo/`;
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          video_id: videoId,
+        }),
+      });
+
+      if (response.ok) {
+        // Update local state only after successful API call
+        setLikedArr(arr => arr.map((v, i) => (i === index ? newLikedState : v)));
+        
+        // Track like action for metrics
+        trackLike(videoId, newLikedState);
+      } else {
+        console.error('Failed to update like status');
+      }
+    } catch (error) {
+      console.error('Error updating like:', error);
     }
   };
 
@@ -354,7 +434,7 @@ export default function HomeScreen() {
       const videoId = clips[videoIndex]?.id;
       if (!videoId) return;
 
-      const response = await fetch(`${backendUrl}/features/getComments/?videoId=${videoId}`, {
+      const response = await fetch(`${backendUrl}/comments/getComments/?videoId=${videoId}`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -380,7 +460,7 @@ export default function HomeScreen() {
       const videoId = clips[currentVideoIndex]?.id;
       if (!videoId) return;
 
-      const response = await fetch(`${backendUrl}/features/addComment/`, {
+      const response = await fetch(`${backendUrl}/comments/addComment/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -391,9 +471,14 @@ export default function HomeScreen() {
           content: newComment.trim(),
         }),
       });
-
+      const data= await response.json();
+      console.log(data);
       if (response.ok) {
-        const data = await response.json();
+        if (data.error) {
+          setSnackbarMessage(data.error);
+          setSnackbarVisible(true);
+          return;
+        }
         setComments(prev => [data.comment, ...prev]);
         setNewComment('');
 
@@ -403,11 +488,15 @@ export default function HomeScreen() {
           trackComment(videoId);
         }
       } else {
-        Alert.alert('Error', 'Failed to add comment');
+        // Parse error message from response
+        const errorMessage = data.error || data.message || 'Failed to add comment';
+        setSnackbarMessage(errorMessage);
+        setSnackbarVisible(true);
       }
     } catch (error) {
       console.error('Error adding comment:', error);
-      Alert.alert('Error', 'Failed to add comment');
+      setSnackbarMessage('Network error: Failed to add comment');
+      setSnackbarVisible(true);
     }
   };
 
@@ -636,6 +725,15 @@ export default function HomeScreen() {
               </Text>
             </TouchableOpacity>
           </View>
+
+          <Snackbar
+            visible={snackbarVisible}
+            onDismiss={() => setSnackbarVisible(false)}
+            duration={3000}
+            style={{ backgroundColor: '#E91E63', position: 'absolute', bottom: 100, zIndex: 1000 }}
+          >
+            {snackbarMessage}
+          </Snackbar>
         </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
