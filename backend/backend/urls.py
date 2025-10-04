@@ -7,4 +7,5 @@ urlpatterns = [
     path('features/', include('features.urls')),
     path('chat/', include('chat.urls')),
     path('posts/', include('Posts.urls')),
+    path('comments/', include('comments.urls')),  # New line added
 ]
