@@ -3,7 +3,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { View, Text, TextInput, Pressable, ActivityIndicator, TouchableOpacity } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useRouter } from 'expo-router';
-import { useAuth } from '@/components/AuthContext';
+import { useAuth } from '../../components/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { backendUrl } from '@/constants/Urls';
 import ClipzyLogo from '@/components/icons/clipzyLogo';

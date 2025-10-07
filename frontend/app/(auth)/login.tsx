@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, TextInput, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useAuth } from '@/components/AuthContext';
+import { useAuth } from '../../components/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { backendUrl } from '@/constants/Urls';
 import ClipzyLogo from '@/components/icons/clipzyLogo';

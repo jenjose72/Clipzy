@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { backendUrl } from '@/constants/Urls';
-import { useAuth } from '@/components/AuthContext';
+import { useAuth } from '../../components/AuthContext';
 
 const UserProfile = () => {
   const { userId } = useLocalSearchParams();

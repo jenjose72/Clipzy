@@ -8,6 +8,7 @@ Automat==25.4.16
 cffi==1.17.1
 channels==4.3.1
 channels_redis==4.3.0
+click==8.3.0
 constantly==23.10.4
 cryptography==45.0.6
 daphne==2.5.0
@@ -15,6 +16,7 @@ Django==5.2.5
 djangorestframework==3.16.1
 djangorestframework_simplejwt==5.5.1
 dotenv==0.9.9
+h11==0.16.0
 hiredis==3.2.1
 hyperlink==21.0.0
 idna==3.10
@@ -37,5 +39,8 @@ Twisted==25.5.0
 txaio==25.6.1
 typing_extensions==4.14.1
 tzdata==2025.2
+uvicorn==0.37.0
 watchgod==0.8.2
 zope.interface==7.2
+numpy==1.26.4
+opencv-python-headless==4.8.1.78

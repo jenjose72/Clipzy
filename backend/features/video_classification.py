@@ -11,17 +11,17 @@ import google.generativeai as genai
 load_dotenv()
 api_key = os.getenv("API_KEY")
 if not api_key:
-    raise ValueError("❌ API_KEY not found in .env file")
+    raise ValueError("API_KEY not found in .env file")
 genai.configure(api_key=api_key)
 
 # List available models for debugging
-try:
-    models = genai.list_models()
-    print("📋 Available models:")
-    for model_info in models:
-        print(f"  - {model_info.name}")
-except Exception as e:
-    print(f"❌ Error listing models: {e}")
+# try:
+#     models = genai.list_models()
+#     print("📋 Available models:")
+#     for model_info in models:
+#         print(f"  - {model_info.name}")
+# except Exception as e:
+#     print(f"Error listing models: {e}")
 
 model = genai.GenerativeModel("gemini-2.0-flash-lite")
 
@@ -60,15 +60,15 @@ def classify_frame(frame):
         print(f"📡 Response dir: {dir(response)}")
 
         if hasattr(response, 'text') and response.text:
-            print(f"✅ Response text: {response.text}")
+            print(f"Response text: {response.text}")
             return response.text.strip()
         else:
-            print("❌ No text in response")
+            print("No text in response")
             return "[]"
 
     except Exception as e:
-        print(f"❌ Error in classify_frame: {str(e)}")
-        print(f"❌ Error type: {type(e)}")
+        print(f"Error in classify_frame: {str(e)}")
+        print(f"Error type: {type(e)}")
         import traceback
         traceback.print_exc()
         return "[]"

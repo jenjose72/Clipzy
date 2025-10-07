@@ -12,17 +12,31 @@ import pandas as pd
 
 
 @api_view(['POST'])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def get_next_clip(request):
-    user_id = request.data.get('user_id')  # Get from request data
-    if not user_id:
-        return Response(
-            {"error": "user_id required"},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+    # Use authenticated user
+    user = request.user
+    if not user or not getattr(user, 'id', None):
+        return Response({"error": "authentication required"}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # Accept optional parameters from the client
+    try:
+        count = int(request.data.get('count', 1))
+    except Exception:
+        count = 1
+
+    exclude_ids = request.data.get('exclude_ids', [])
+    # allow comma-separated string or list
+    if isinstance(exclude_ids, str):
+        exclude_ids = [int(x) for x in exclude_ids.split(',') if x.strip().isdigit()]
+    elif isinstance(exclude_ids, list):
+        try:
+            exclude_ids = [int(x) for x in exclude_ids]
+        except Exception:
+            exclude_ids = []
 
     try:
-        user_profile = UserProfile.objects.get(user__id=user_id)
+        user_profile = UserProfile.objects.get(user__id=user.id)
     except UserProfile.DoesNotExist:
         return Response(
             {"error": "User profile not found"},
@@ -38,12 +52,12 @@ def get_next_clip(request):
     if df.empty:
         user_data = pd.DataFrame(
             [ [0]*len(categories) ],
-            index=[user_id],
+            index=[user.id],
             columns=categories
         )
     else:
         user_data = df.pivot_table(
-            index=lambda x: user_id,  
+            index=lambda x: user.id,  
             columns='categories__name',
             values='weights',
             fill_value=0
@@ -51,7 +65,7 @@ def get_next_clip(request):
         user_data = user_data.reindex(columns=categories, fill_value=0)
 
     try:
-        result = next_clip(user_data)
+        result = next_clip(user_data, count=count, exclude_ids=exclude_ids)
     except Exception as e:
         return Response(
             {"error": str(e)},
@@ -70,8 +84,8 @@ def sendVideoMetrics(request):
         return Response({'error': 'No metrics data provided.'}, status=400)
     
     # Print the metrics data to backend console/logs
-    print("📊 Received Video Metrics from user:", user.username)
-    print("📈 Metrics Data:")
+    print("Received Video Metrics from user:", user.username)
+    print("Metrics Data:")
     for metric in metrics_data:
         print(f"  Video ID: {metric.get('videoId')}")
         print(f"  Categories: {metric.get('categories', [])}")
@@ -81,7 +95,7 @@ def sendVideoMetrics(request):
         print("  ---")
     
     # Process metrics to update user metadata
-    print("💾 PRODUCTION MODE: Actually saving metadata updates to database")
+    print("PRODUCTION MODE: Actually saving metadata updates to database")
     try:
         user_profile = UserProfile.objects.get(user=user)
         updated_categories = set()
@@ -95,7 +109,7 @@ def sendVideoMetrics(request):
             
             # Check for negative engagement (low watch % with no interaction)
             if 5 <= watch_percentage <= 10 and not liked and not commented:
-                print(f"👎 LOW ENGAGEMENT detected for video {video_id} - applying negative weights")
+                print(f"LOW ENGAGEMENT detected for video {video_id} - applying negative weights")
                 negative_score = -0.3  # Negative penalty for disinterest
                 
                 for category_name in categories:
@@ -175,8 +189,8 @@ def sendVideoMetrics(request):
             if user_metadata_entries.exists():
                 total_weight = sum(entry.weights for entry in user_metadata_entries)
                 avg_weight = total_weight / len(updated_categories)
-                print(f"📊 Average weight across {len(updated_categories)} categories: {avg_weight}")
-                print(f"📊 Detailed category weights:")
+                print(f"Average weight across {len(updated_categories)} categories: {avg_weight}")
+                print(f"Detailed category weights:")
                 for entry in user_metadata_entries:
                     print(f"    {entry.categories.name}: {entry.weights}")
                 
@@ -184,9 +198,9 @@ def sendVideoMetrics(request):
                 # For now, just log it
         
     except UserProfile.DoesNotExist:
-        print(f"⚠️  UserProfile not found for user {user.username}")
+        print(f"UserProfile not found for user {user.username}")
     except Exception as e:
-        print(f"❌ Error updating user metadata: {str(e)}")
+        print(f"Error updating user metadata: {str(e)}")
     
     return Response({
         'message': 'Video metrics received and metadata updated successfully. Check backend logs for details.',
