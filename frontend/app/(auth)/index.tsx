@@ -2,7 +2,7 @@
 import React, { useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useAuth } from '@/components/AuthContext';
+import { useAuth } from '../../components/AuthContext';
 import ClipzyLogo from '@/components/icons/clipzyLogo';
 
 export default function AuthIndex() {

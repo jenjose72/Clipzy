@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { StyleSheet, View, Dimensions, TouchableWithoutFeedback, FlatList, TouchableOpacity, SafeAreaView, Modal, TextInput, KeyboardAvoidingView, Platform, Alert, Text, Animated, Easing, RefreshControl } from 'react-native';
-import { useAuth } from '@/components/AuthContext';
+import { useAuth } from '../../components/AuthContext';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
@@ -11,11 +11,12 @@ import { Snackbar } from 'react-native-paper';
 const { width, height } = Dimensions.get('window');
 
 export default function HomeScreen() {
-  console.log('🏠 HomeScreen component rendered');
+  console.log('HomeScreen component rendered');
 
   const { user, logout } = useAuth();
   const router = useRouter();
   const videoRefs = useRef<(Video | null)[]>([]);
+  const requestedNextIds = useRef<Set<number>>(new Set());
   const [playingIndex, setPlayingIndex] = useState(0);
   const [clips, setClips] = useState<any[]>([]);
   const [newCreatorsClips, setNewCreatorsClips] = useState<any[]>([]);
@@ -35,9 +36,13 @@ export default function HomeScreen() {
   const [snackbarMessage, setSnackbarMessage] = useState('');
 
   useEffect(() => {
+    console.log('useEffect: user value =', user);
+    console.log('useEffect: backendUrl =', backendUrl);
     if (!user) {
+      console.log('User not logged in, redirecting to auth');
       router.replace('/(auth)');
     } else {
+      console.log('User present, fetching clips');
       fetchClips(false);
       fetchNewCreatorsClips();
     }
@@ -76,6 +81,26 @@ export default function HomeScreen() {
       console.log('📈 VideoMetrics state updated:', videoMetrics);
     }
   }, [videoMetrics]);
+
+  // When the current playing index (video) changes, prefetch the next clip.
+  // This ensures we request the next clip as soon as the user navigates to a new video.
+  useEffect(() => {
+    try {
+      if (loading) return; // don't prefetch while initial load in progress
+      const currentClips = getCurrentClips();
+      const currentVideoId = currentClips[playingIndex]?.id;
+      if (!currentVideoId) return;
+
+      // Avoid duplicate fetches for the same video
+      if (!requestedNextIds.current.has(currentVideoId)) {
+        requestedNextIds.current.add(currentVideoId);
+        // fire-and-forget; fetchNextClip logs errors internally
+        fetchNextClip(1).catch(err => console.error('Prefetch next clip (useEffect) failed:', err));
+      }
+    } catch (err) {
+      console.error('Error in playingIndex useEffect prefetch:', err);
+    }
+  }, [playingIndex, selectedPage, clips, loading]);
 
   const getCurrentClips = () => {
     return selectedPage === 'forYou' ? clips : newCreatorsClips;
@@ -164,51 +189,96 @@ export default function HomeScreen() {
 
   const fetchClips = async (isRefresh = false) => {
     try {
+      console.log('fetchClips: requesting initial recommended clips');
       const token = await AsyncStorage.getItem('accessToken');
-      const response = await fetch(`${backendUrl}/features/fetchClips/`, {
-        method: 'GET',
+
+      const response = await fetch(`${backendUrl}/posts/next_clip/`, {
+        method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
+        body: JSON.stringify({ count: 5 }),
       });
 
       if (response.ok) {
         const data = await response.json();
-        setClips(data.clips || []);
-        console.log(data.clips);
-        
-        // Initialize metrics for new videos
-        (data.clips || []).forEach((clip: any) => {
-          console.log('🎬 Initializing metrics for video:', clip.id, 'categories:', clip.categories);
-          updateVideoMetrics(clip.id, { categories: clip.categories || [] });
-        });
-        
-        // Initialize arrays based on the number of clips
-        const clipCount = data.clips?.length || 0;
+        const clipsData = data.clips || data.clip || [];
+        setClips(clipsData);
+        // reset requested-next tracker when we load a fresh batch
+        requestedNextIds.current = new Set();
+
+        // Initialize metrics / UI arrays
+        clipsData.forEach((clip: any) => updateVideoMetrics(clip.id, { categories: clip.categories || [] }));
+        const clipCount = clipsData.length;
         progressAnimations.current = new Array(clipCount).fill(null).map(() => new Animated.Value(0));
         setIsPlayingArr(new Array(clipCount).fill(false).map((_, i) => i === 0));
         setLikedArr(new Array(clipCount).fill(false));
 
-        // Check liked status for each video
-        if (token) {
-          await checkLikedStatus(data.clips || [], 'forYou');
-        }
+        // Check liked status
+        if (token) await checkLikedStatus(clipsData, 'forYou');
       } else {
-        Alert.alert('Error', 'Failed to fetch videos');
+        console.error('fetchClips: posts/next_clip/ returned', response.status);
+        Alert.alert('Error', 'Failed to fetch recommended videos');
       }
     } catch (error) {
       console.error('Error fetching clips:', error);
       Alert.alert('Error', 'Failed to fetch videos');
     } finally {
-      if (!isRefresh) {
-        setLoading(false);
+      if (!isRefresh) setLoading(false);
+    }
+  };
+
+  const fetchNextClip = async (count = 1) => {
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      // Resolve user id similar to fetchClips
+      let userId: any = null;
+      const excludeIds = (clips || []).map(c => c.id);
+      const body = { count, exclude_ids: excludeIds } as any;
+
+      const response = await fetch(`${backendUrl}/posts/next_clip/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        console.error('Failed to fetch next clip:', response.status);
+        return null;
       }
+
+      const data = await response.json();
+      const newClips = data.clips || (data.clip ? [data.clip] : []);
+      if (!newClips || newClips.length === 0) return null;
+
+      // Append new clips and initialize their metrics/animation state
+      setClips(prev => {
+        const updated = [...prev, ...newClips];
+        newClips.forEach((clip: any) => updateVideoMetrics(clip.id, { categories: clip.categories || [] }));
+        return updated;
+      });
+
+      // Extend progress animations, isPlayingArr, likedArr
+      progressAnimations.current = progressAnimations.current.concat(new Array(newClips.length).fill(null).map(() => new Animated.Value(0)));
+      setIsPlayingArr(prev => prev.concat(new Array(newClips.length).fill(false)));
+      setLikedArr(prev => prev.concat(new Array(newClips.length).fill(false)));
+
+      return newClips;
+    } catch (error) {
+      console.error('Error fetching next clip:', error);
+      return null;
     }
   };
 
   const fetchNewCreatorsClips = async () => {
     try {
+      console.log('fetchNewCreatorsClips: starting');
       const token = await AsyncStorage.getItem('accessToken');
+      console.log('fetchNewCreatorsClips: token present?', !!token);
       // For now, we'll use the same endpoint but you can modify this to fetch different data
       // You might want to add a separate endpoint for new creators
       const response = await fetch(`${backendUrl}/features/fetchClips/`, {
@@ -341,7 +411,9 @@ export default function HomeScreen() {
         try {
           const status = await videoRef.getStatusAsync();
           if (status.isLoaded && status.durationMillis && status.durationMillis > 0) {
-            const progress = (status.positionMillis || 0) / status.durationMillis;
+            const position = status.positionMillis || 0;
+            const duration = status.durationMillis || 0;
+            const progress = position / duration;
             progressAnimations.current[index].setValue(progress);
 
             // Track watch percentage only when it changes significantly (every 5% or more)
@@ -353,6 +425,27 @@ export default function HomeScreen() {
                 trackWatchPercentage(videoId, progress);
                 lastTrackedPercentage = currentPercentage;
               }
+            }
+
+            // Additionally, trigger next-clip fetch more reliably:
+            // - if progress >= 95%
+            // - or if playback reports didJustFinish
+            // - or if within 500ms of the end
+            try {
+              const currentClips = getCurrentClips();
+              const videoId = currentClips[index]?.id;
+              const nearEnd = duration > 0 && (duration - position) <= 500;
+              if (videoId) {
+                if (status.didJustFinish || progress >= 0.95 || nearEnd) {
+                  console.log(`Requesting next clip for video ${videoId} (progress=${(progress*100).toFixed(1)}%, didJustFinish=${!!status.didJustFinish}, nearEnd=${nearEnd})`);
+                  if (!requestedNextIds.current.has(videoId)) {
+                    requestedNextIds.current.add(videoId);
+                    await fetchNextClip(1);
+                  }
+                }
+              }
+            } catch (err) {
+              console.error('Error while checking/ requesting next clip:', err);
             }
           }
         } catch (error) {
@@ -539,6 +632,18 @@ export default function HomeScreen() {
         }
         // Start progress updates for the visible video
         startProgressUpdates(newIndex);
+        // Prefetch next clip when user navigates to a new video (swipe)
+        try {
+          const newVideoId = currentClips[newIndex]?.id;
+          if (newVideoId && !requestedNextIds.current.has(newVideoId)) {
+            // mark as requested so we don't duplicate requests
+            requestedNextIds.current.add(newVideoId);
+            // fire-and-forget; errors logged inside fetchNextClip
+            fetchNextClip(1).catch((err) => console.error('Prefetch next clip failed:', err));
+          }
+        } catch (err) {
+          console.error('Error during prefetch next clip on swipe:', err);
+        }
         // Stop progress updates for all other videos
         progressUpdateIntervals.current.forEach((_, i) => {
           if (i !== newIndex) {

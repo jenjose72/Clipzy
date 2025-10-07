@@ -1,12 +1,15 @@
 from django.shortcuts import render
 from django.http import JsonResponse
 from transformers import pipeline
+from django.conf import settings
+from pathlib import Path
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from features.models import Clip, Comment
 
 
-model_path = "C:/Users/jenjo/Desktop/R/Project/Clipzy/backend/comments/hate_speech"
+
+model_path = str(Path(settings.BASE_DIR) / "comments" / "hate_speech")
 pipe = pipeline("text-classification", model=model_path, framework="pt")
 
 def classify_text(text):

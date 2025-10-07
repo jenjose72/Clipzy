@@ -5,7 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native';
 
 import { useColorScheme } from '@/hooks/useColorScheme';
-import { AuthProvider } from '@/components/AuthContext';
+import { AuthProvider } from '../components/AuthContext';
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
