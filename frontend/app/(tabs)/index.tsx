@@ -11,12 +11,14 @@ import { Snackbar } from 'react-native-paper';
 const { width, height } = Dimensions.get('window');
 
 export default function HomeScreen() {
-  console.log('HomeScreen component rendered');
-
   const { user, logout } = useAuth();
   const router = useRouter();
   const videoRefs = useRef<(Video | null)[]>([]);
   const requestedNextIds = useRef<Set<number>>(new Set());
+  const currentWatchedTime = useRef(0);
+  const currentStartTime = useRef<number | null>(null);
+  const playingIndexRef = useRef(0); // Ref to track current playing index for callbacks
+  const currentClipsRef = useRef<any[]>([]); // Ref to track current clips array for callbacks
   const [playingIndex, setPlayingIndex] = useState(0);
   const [clips, setClips] = useState<any[]>([]);
   const [newCreatorsClips, setNewCreatorsClips] = useState<any[]>([]);
@@ -31,18 +33,15 @@ export default function HomeScreen() {
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState('');
   const [refreshing, setRefreshing] = useState(false);
-  const [videoMetrics, setVideoMetrics] = useState<any[]>([]);
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
+  const [displayWatchedTime, setDisplayWatchedTime] = useState(0);
+  const currentVideoMetric = useRef<any>(null);
 
   useEffect(() => {
-    console.log('useEffect: user value =', user);
-    console.log('useEffect: backendUrl =', backendUrl);
     if (!user) {
-      console.log('User not logged in, redirecting to auth');
       router.replace('/(auth)');
     } else {
-      console.log('User present, fetching clips');
       fetchClips(false);
       fetchNewCreatorsClips();
     }
@@ -54,13 +53,23 @@ export default function HomeScreen() {
         const currentVideoRef = videoRefs.current[playingIndex];
         const currentClips = getCurrentClips();
         if (currentVideoRef && currentClips[playingIndex]) {
-          currentVideoRef.getStatusAsync().then(status => {
+          currentVideoRef.getStatusAsync().then(async (status) => {
             if (status.isLoaded && status.durationMillis && status.durationMillis > 0) {
-              const finalProgress = (status.positionMillis || 0) / status.durationMillis;
+              const duration = status.durationMillis / 1000;
+              const watchedSeconds = currentWatchedTime.current / 1000;
+              const finalProgress = Math.min(watchedSeconds / duration, 1);
               const currentVideoId = currentClips[playingIndex]?.id;
               if (currentVideoId && finalProgress > 0) {
-                console.log(`🎬 Final watch percentage on unmount for video ${currentVideoId}: ${Math.round(finalProgress * 100)}%`);
-                trackWatchPercentage(currentVideoId, finalProgress);
+                const metricsToSend = [{
+                  videoId: currentVideoId,
+                  categories: currentClips[playingIndex]?.categories || [],
+                  watchPercentage: Math.round(finalProgress * 100),
+                  liked: likedArr[playingIndex] || false,
+                  commented: false
+                }];
+                
+                console.log('📤 UNMOUNT: Sending metrics for video:', currentVideoId, 'watch:', Math.round(finalProgress * 100) + '%');
+                await sendMetricsDirect(metricsToSend);
               }
             }
           }).catch(error => {
@@ -75,18 +84,19 @@ export default function HomeScreen() {
     };
   }, [user, router]);
 
-  // Debug: Log when videoMetrics changes
+  // Keep currentClipsRef in sync with the active clips array
   useEffect(() => {
-    if (videoMetrics.length > 0) {
-      console.log('📈 VideoMetrics state updated:', videoMetrics);
-    }
-  }, [videoMetrics]);
+    currentClipsRef.current = getCurrentClips();
+  }, [clips, newCreatorsClips, selectedPage]);
 
   // When the current playing index (video) changes, prefetch the next clip.
   // This ensures we request the next clip as soon as the user navigates to a new video.
+  // Only prefetch for "For You" page, not "New Creators"
   useEffect(() => {
     try {
       if (loading) return; // don't prefetch while initial load in progress
+      if (selectedPage !== 'forYou') return; // Only prefetch for "For You" page
+      
       const currentClips = getCurrentClips();
       const currentVideoId = currentClips[playingIndex]?.id;
       if (!currentVideoId) return;
@@ -111,7 +121,18 @@ export default function HomeScreen() {
     progressAnimations.current = new Array(clipCount).fill(null).map(() => new Animated.Value(0));
     setIsPlayingArr(new Array(clipCount).fill(false).map((_, i) => i === 0));
     setLikedArr(new Array(clipCount).fill(false));
+    playingIndexRef.current = 0; // Update ref
     setPlayingIndex(0);
+    
+    // Reset watch tracking
+    currentWatchedTime.current = 0;
+    currentStartTime.current = null;
+    currentVideoMetric.current = null;
+    
+    // Start tracking the first video after a brief delay
+    setTimeout(() => {
+      startProgressUpdates(0);
+    }, 100);
   };
 
   const handlePageSwitch = async (page: 'forYou' | 'newCreators') => {
@@ -120,29 +141,42 @@ export default function HomeScreen() {
       const currentVideoRef = videoRefs.current[playingIndex];
       const currentClips = getCurrentClips();
       if (currentVideoRef && currentClips[playingIndex]) {
-        currentVideoRef.getStatusAsync().then(status => {
+        try {
+          const status = await currentVideoRef.getStatusAsync();
           if (status.isLoaded && status.durationMillis && status.durationMillis > 0) {
-            const finalProgress = (status.positionMillis || 0) / status.durationMillis;
+            const duration = status.durationMillis / 1000;
+            const watchedSeconds = currentWatchedTime.current / 1000;
+            const finalProgress = Math.min(watchedSeconds / duration, 1);
             const currentVideoId = currentClips[playingIndex]?.id;
             if (currentVideoId && finalProgress > 0) {
-              console.log(`🎬 Final watch percentage on page switch for video ${currentVideoId}: ${Math.round(finalProgress * 100)}%`);
-              trackWatchPercentage(currentVideoId, finalProgress);
+              const metricsToSend = [{
+                videoId: currentVideoId,
+                categories: currentClips[playingIndex]?.categories || [],
+                watchPercentage: Math.round(finalProgress * 100),
+                liked: likedArr[playingIndex] || false,
+                commented: false
+              }];
+              
+              console.log('� PAGE SWITCH: Sending metrics for video:', currentVideoId, 'watch:', Math.round(finalProgress * 100) + '%');
+              await sendMetricsDirect(metricsToSend);
             }
           }
-        }).catch(error => {
+        } catch (error) {
           console.error('Error getting final status on page switch:', error);
-        });
+        }
       }
     }
+    currentWatchedTime.current = 0;
+    currentStartTime.current = null;
 
     setSelectedPage(page);
     const currentClips = page === 'forYou' ? clips : newCreatorsClips;
     initializeProgressForPage(currentClips);
-    // Stop all current intervals
     progressUpdateIntervals.current.forEach(interval => {
       if (interval) clearInterval(interval);
     });
     progressUpdateIntervals.current = [];
+    currentVideoMetric.current = null;
 
     // Update liked status for the new page
     const token = await AsyncStorage.getItem('accessToken');
@@ -189,7 +223,6 @@ export default function HomeScreen() {
 
   const fetchClips = async (isRefresh = false) => {
     try {
-      console.log('fetchClips: requesting initial recommended clips');
       const token = await AsyncStorage.getItem('accessToken');
 
       const response = await fetch(`${backendUrl}/posts/next_clip/`, {
@@ -205,20 +238,23 @@ export default function HomeScreen() {
         const data = await response.json();
         const clipsData = data.clips || data.clip || [];
         setClips(clipsData);
-        // reset requested-next tracker when we load a fresh batch
         requestedNextIds.current = new Set();
 
-        // Initialize metrics / UI arrays
-        clipsData.forEach((clip: any) => updateVideoMetrics(clip.id, { categories: clip.categories || [] }));
         const clipCount = clipsData.length;
         progressAnimations.current = new Array(clipCount).fill(null).map(() => new Animated.Value(0));
         setIsPlayingArr(new Array(clipCount).fill(false).map((_, i) => i === 0));
         setLikedArr(new Array(clipCount).fill(false));
 
-        // Check liked status
         if (token) await checkLikedStatus(clipsData, 'forYou');
+        
+        // Start tracking the first video automatically
+        setTimeout(() => {
+          if (selectedPage === 'forYou') {
+            startProgressUpdates(0);
+          }
+        }, 100);
       } else {
-        console.error('fetchClips: posts/next_clip/ returned', response.status);
+        console.error('Failed to fetch clips:', response.status);
         Alert.alert('Error', 'Failed to fetch recommended videos');
       }
     } catch (error) {
@@ -232,7 +268,6 @@ export default function HomeScreen() {
   const fetchNextClip = async (count = 1) => {
     try {
       const token = await AsyncStorage.getItem('accessToken');
-      // Resolve user id similar to fetchClips
       let userId: any = null;
       const excludeIds = (clips || []).map(c => c.id);
       const body = { count, exclude_ids: excludeIds } as any;
@@ -255,15 +290,18 @@ export default function HomeScreen() {
       const newClips = data.clips || (data.clip ? [data.clip] : []);
       if (!newClips || newClips.length === 0) return null;
 
-      // Append new clips and initialize their metrics/animation state
-      setClips(prev => {
-        const updated = [...prev, ...newClips];
-        newClips.forEach((clip: any) => updateVideoMetrics(clip.id, { categories: clip.categories || [] }));
-        return updated;
-      });
+      // Filter out any clips that already exist (by ID) to prevent duplicate keys
+      const existingIds = new Set(clips.map(c => c.id));
+      const uniqueNewClips = newClips.filter((clip: any) => !existingIds.has(clip.id));
+      
+      if (uniqueNewClips.length === 0) {
+        console.log('⚠️ No new unique clips to add');
+        return null;
+      }
 
-      // Extend progress animations, isPlayingArr, likedArr
-      progressAnimations.current = progressAnimations.current.concat(new Array(newClips.length).fill(null).map(() => new Animated.Value(0)));
+      setClips(prev => [...prev, ...uniqueNewClips]);
+
+      progressAnimations.current = progressAnimations.current.concat(new Array(uniqueNewClips.length).fill(null).map(() => new Animated.Value(0)));
       setIsPlayingArr(prev => prev.concat(new Array(newClips.length).fill(false)));
       setLikedArr(prev => prev.concat(new Array(newClips.length).fill(false)));
 
@@ -276,11 +314,7 @@ export default function HomeScreen() {
 
   const fetchNewCreatorsClips = async () => {
     try {
-      console.log('fetchNewCreatorsClips: starting');
       const token = await AsyncStorage.getItem('accessToken');
-      console.log('fetchNewCreatorsClips: token present?', !!token);
-      // For now, we'll use the same endpoint but you can modify this to fetch different data
-      // You might want to add a separate endpoint for new creators
       const response = await fetch(`${backendUrl}/features/fetchClips/`, {
         method: 'GET',
         headers: {
@@ -290,18 +324,9 @@ export default function HomeScreen() {
 
       if (response.ok) {
         const data = await response.json();
-        // For demo purposes, we'll just reverse the order to simulate different content
-        // In a real app, you'd have different logic to fetch new creators' content
         const reversedClips = (data.clips || []).reverse();
         setNewCreatorsClips(reversedClips);
-        
-        // Initialize metrics for new creator videos
-        reversedClips.forEach((clip: any) => {
-          console.log('🎬 Initializing metrics for new creator video:', clip.id, 'categories:', clip.categories);
-          updateVideoMetrics(clip.id, { categories: clip.categories || [] });
-        });
 
-        // Check liked status for new creator videos
         if (token) {
           await checkLikedStatus(reversedClips, 'newCreators');
         }
@@ -317,30 +342,6 @@ export default function HomeScreen() {
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      // Send video metrics to backend before refreshing
-      if (videoMetrics.length > 0) {
-        console.log('📤 Sending video metrics to backend...');
-        const token = await AsyncStorage.getItem('accessToken');
-        const response = await fetch(`${backendUrl}/posts/sendVideoMetrics/`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            metrics: videoMetrics
-          }),
-        });
-
-        if (response.ok) {
-          console.log('✅ Video metrics sent successfully');
-          // Clear metrics after successful send
-          setVideoMetrics([]);
-        } else {
-          console.error('❌ Failed to send video metrics');
-        }
-      }
-
       await Promise.all([fetchClips(true), fetchNewCreatorsClips()]);
     } catch (error) {
       console.error('Error refreshing videos:', error);
@@ -349,57 +350,78 @@ export default function HomeScreen() {
     }
   };
 
-  // Video Metrics Tracking
-  const updateVideoMetrics = (videoId: string, updates: any) => {
-    console.log('🔄 Updating metrics for video:', videoId, 'with updates:', updates);
-    setVideoMetrics(prev => {
-      const existingIndex = prev.findIndex(metric => metric.videoId === videoId);
-      const currentClips = getCurrentClips();
-      const videoData = currentClips.find(clip => clip.id === videoId);
+  const sendMetricsDirect = async (metrics: any[]) => {
+    if (metrics.length === 0) return;
+    
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      const response = await fetch(`${backendUrl}/posts/sendVideoMetrics/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          metrics: metrics
+        }),
+      });
 
-      const metricData = {
-        videoId,
-        categories: videoData?.categories || [],
+      if (!response.ok) {
+        console.error('Failed to send direct metrics:', response.status);
+      }
+    } catch (error) {
+      console.error('Error sending direct metrics:', error);
+    }
+  };
+
+  const trackLike = async (videoId: string, liked: boolean) => {
+    const currentClips = getCurrentClips();
+    const videoIndex = currentClips.findIndex(clip => clip.id === videoId);
+    const videoData = currentClips[videoIndex];
+    
+    if (videoData) {
+      const metricsToSend = [{
+        videoId: videoId,
+        categories: videoData.categories || [],
+        watchPercentage: 0,
+        liked: liked,
+        commented: false
+      }];
+      
+      console.log('❤️ LIKE: Sending metrics for video:', videoId, 'liked:', liked);
+      await sendMetricsDirect(metricsToSend);
+    }
+  };
+
+  const trackComment = async (videoId: string) => {
+    const currentClips = getCurrentClips();
+    const videoIndex = currentClips.findIndex(clip => clip.id === videoId);
+    const videoData = currentClips[videoIndex];
+    
+    if (videoData) {
+      const metricsToSend = [{
+        videoId: videoId,
+        categories: videoData.categories || [],
         watchPercentage: 0,
         liked: false,
-        commented: false,
-        ...updates
-      };
-
-      let newMetrics;
-      if (existingIndex >= 0) {
-        // Update existing metric
-        newMetrics = [...prev];
-        newMetrics[existingIndex] = { ...newMetrics[existingIndex], ...updates };
-      } else {
-        // Add new metric, keep only last 5
-        newMetrics = [...prev, metricData].slice(-5);
-      }
-
-      console.log('📊 Video Metrics (last 5 videos):', JSON.stringify(newMetrics, null, 2));
-      return newMetrics;
-    });
-  };
-
-  const trackWatchPercentage = (videoId: string, percentage: number) => {
-    console.log('👀 Tracking watch percentage:', videoId, Math.round(percentage * 100) + '%');
-    updateVideoMetrics(videoId, { watchPercentage: Math.round(percentage * 100) });
-  };
-
-  const trackLike = (videoId: string, liked: boolean) => {
-    console.log('❤️ Tracking like:', videoId, liked ? 'liked' : 'unliked');
-    updateVideoMetrics(videoId, { liked });
-  };
-
-  const trackComment = (videoId: string) => {
-    console.log('💬 Tracking comment:', videoId);
-    updateVideoMetrics(videoId, { commented: true });
+        commented: true
+      }];
+      
+      console.log('💬 COMMENT: Sending metrics for video:', videoId);
+      await sendMetricsDirect(metricsToSend);
+    }
   };
 
   const startProgressUpdates = (index: number) => {
     // Clear any existing interval for this video
     if (progressUpdateIntervals.current[index]) {
       clearInterval(progressUpdateIntervals.current[index]);
+    }
+
+    // Start watch time if not already started
+    if (currentStartTime.current === null) {
+      currentStartTime.current = Date.now();
+      console.log('⏱️ Started tracking watch time for index:', index);
     }
 
     let lastTrackedPercentage = 0;
@@ -416,28 +438,32 @@ export default function HomeScreen() {
             const progress = position / duration;
             progressAnimations.current[index].setValue(progress);
 
-            // Track watch percentage only when it changes significantly (every 5% or more)
-            const currentPercentage = Math.round(progress * 100);
-            if (Math.abs(currentPercentage - lastTrackedPercentage) >= 5) {
-              const currentClips = getCurrentClips();
-              const videoId = currentClips[index]?.id;
-              if (videoId) {
-                trackWatchPercentage(videoId, progress);
-                lastTrackedPercentage = currentPercentage;
-              }
+            const liveWatched = currentWatchedTime.current + (currentStartTime.current ? Date.now() - currentStartTime.current : 0);
+            setDisplayWatchedTime(liveWatched);
+
+            // Update current video metric reference
+            const currentClips = getCurrentClips();
+            const videoId = currentClips[index]?.id;
+            if (videoId) {
+              const watchedSeconds = currentWatchedTime.current / 1000;
+              const currentProgress = Math.min(watchedSeconds / (duration / 1000), 1);
+              const currentProgressPercent = Math.round(currentProgress * 100);
+              
+              currentVideoMetric.current = {
+                videoId: videoId,
+                categories: currentClips[index]?.categories || [],
+                watchPercentage: currentProgressPercent,
+                liked: likedArr[index] || false,
+                commented: false
+              };
             }
 
-            // Additionally, trigger next-clip fetch more reliably:
-            // - if progress >= 95%
-            // - or if playback reports didJustFinish
-            // - or if within 500ms of the end
             try {
               const currentClips = getCurrentClips();
               const videoId = currentClips[index]?.id;
               const nearEnd = duration > 0 && (duration - position) <= 500;
-              if (videoId) {
+              if (videoId && selectedPage === 'forYou') {
                 if (status.didJustFinish || progress >= 0.95 || nearEnd) {
-                  console.log(`Requesting next clip for video ${videoId} (progress=${(progress*100).toFixed(1)}%, didJustFinish=${!!status.didJustFinish}, nearEnd=${nearEnd})`);
                   if (!requestedNextIds.current.has(videoId)) {
                     requestedNextIds.current.add(videoId);
                     await fetchNextClip(1);
@@ -445,7 +471,7 @@ export default function HomeScreen() {
                 }
               }
             } catch (err) {
-              console.error('Error while checking/ requesting next clip:', err);
+              console.error('Error checking next clip:', err);
             }
           }
         } catch (error) {
@@ -459,6 +485,12 @@ export default function HomeScreen() {
     if (progressUpdateIntervals.current[index]) {
       clearInterval(progressUpdateIntervals.current[index]);
       progressUpdateIntervals.current[index] = null as any;
+    }
+    // Stop watch time
+    if (currentStartTime.current !== null) {
+      currentWatchedTime.current += Date.now() - currentStartTime.current;
+      console.log('⏸️ Stopped tracking, total watched:', (currentWatchedTime.current / 1000).toFixed(1) + 's');
+      currentStartTime.current = null;
     }
   };
 
@@ -504,7 +536,7 @@ export default function HomeScreen() {
         setLikedArr(arr => arr.map((v, i) => (i === index ? newLikedState : v)));
         
         // Track like action for metrics
-        trackLike(videoId, newLikedState);
+        await trackLike(videoId, newLikedState);
       } else {
         console.error('Failed to update like status');
       }
@@ -524,7 +556,8 @@ export default function HomeScreen() {
       const token = await AsyncStorage.getItem('accessToken');
       if (!token) return;
 
-      const videoId = clips[videoIndex]?.id;
+      const currentClips = getCurrentClips();
+      const videoId = currentClips[videoIndex]?.id;
       if (!videoId) return;
 
       const response = await fetch(`${backendUrl}/comments/getComments/?videoId=${videoId}`, {
@@ -550,7 +583,8 @@ export default function HomeScreen() {
       const token = await AsyncStorage.getItem('accessToken');
       if (!token) return;
 
-      const videoId = clips[currentVideoIndex]?.id;
+      const currentClips = getCurrentClips();
+      const videoId = currentClips[currentVideoIndex]?.id;
       if (!videoId) return;
 
       const response = await fetch(`${backendUrl}/comments/addComment/`, {
@@ -564,8 +598,8 @@ export default function HomeScreen() {
           content: newComment.trim(),
         }),
       });
-      const data= await response.json();
-      console.log(data);
+      const data = await response.json();
+      
       if (response.ok) {
         if (data.error) {
           setSnackbarMessage(data.error);
@@ -574,14 +608,8 @@ export default function HomeScreen() {
         }
         setComments(prev => [data.comment, ...prev]);
         setNewComment('');
-
-        // Track comment action
-        const videoId = clips[currentVideoIndex]?.id;
-        if (videoId) {
-          trackComment(videoId);
-        }
+        await trackComment(videoId);
       } else {
-        // Parse error message from response
         const errorMessage = data.error || data.message || 'Failed to add comment';
         setSnackbarMessage(errorMessage);
         setSnackbarVisible(true);
@@ -594,74 +622,131 @@ export default function HomeScreen() {
   };
 
   const onViewableItemsChanged = React.useRef(({ viewableItems }: any) => {
-    if (viewableItems.length > 0) {
-      // Find the item with the highest visibility percentage
-      const mostVisibleItem = viewableItems.reduce((prev: any, current: any) => {
-        return (prev.isViewable && current.isViewable && current.itemVisiblePercent > prev.itemVisiblePercent) ? current : prev;
-      });
-
-      const newIndex = mostVisibleItem.index;
-      const currentClips = getCurrentClips();
-
-      // Only proceed if this is a different video
-      if (newIndex !== playingIndex) {
-        // Track final watch percentage for the previous video before switching
-        if (playingIndex >= 0) {
-          const prevVideoRef = videoRefs.current[playingIndex];
-          if (prevVideoRef) {
-            prevVideoRef.getStatusAsync().then(status => {
-              if (status.isLoaded && status.durationMillis && status.durationMillis > 0) {
-                const finalProgress = (status.positionMillis || 0) / status.durationMillis;
-                const prevVideoId = currentClips[playingIndex]?.id;
-                if (prevVideoId && finalProgress > 0) {
-                  console.log(`🎬 Final watch percentage for video ${prevVideoId}: ${Math.round(finalProgress * 100)}%`);
-                  trackWatchPercentage(prevVideoId, finalProgress);
-                }
-              }
-            }).catch(error => {
-              console.error('Error getting final status:', error);
-            });
-          }
-        }
-
-        setPlayingIndex(newIndex);
-        setIsPlayingArr(arr => arr.map((_, i) => i === newIndex));
-        // Reset progress for the new video
-        if (progressAnimations.current[newIndex]) {
-          progressAnimations.current[newIndex].setValue(0);
-        }
-        // Start progress updates for the visible video
-        startProgressUpdates(newIndex);
-        // Prefetch next clip when user navigates to a new video (swipe)
-        try {
-          const newVideoId = currentClips[newIndex]?.id;
-          if (newVideoId && !requestedNextIds.current.has(newVideoId)) {
-            // mark as requested so we don't duplicate requests
-            requestedNextIds.current.add(newVideoId);
-            // fire-and-forget; errors logged inside fetchNextClip
-            fetchNextClip(1).catch((err) => console.error('Prefetch next clip failed:', err));
-          }
-        } catch (err) {
-          console.error('Error during prefetch next clip on swipe:', err);
-        }
-        // Stop progress updates for all other videos
-        progressUpdateIntervals.current.forEach((_, i) => {
-          if (i !== newIndex) {
-            stopProgressUpdates(i);
-          }
+    (async () => {
+      if (viewableItems.length > 0) {
+        // Find the item with the highest visibility percentage
+        const mostVisibleItem = viewableItems.reduce((prev: any, current: any) => {
+          return (prev.isViewable && current.isViewable && current.itemVisiblePercent > prev.itemVisiblePercent) ? current : prev;
         });
-        // Pause all except the one in view
-        videoRefs.current.forEach((ref, i) => {
-          if (ref) {
-            if (i === newIndex) {
-              ref.playAsync();
+
+        const newIndex = mostVisibleItem.index;
+
+        console.log('👁️ Viewable change - newIndex:', newIndex, 'playingIndexRef:', playingIndexRef.current);
+
+        // Only proceed if this is a different video
+        if (newIndex !== playingIndexRef.current) {
+          console.log('📹 VIDEO CHANGE DETECTED from', playingIndexRef.current, 'to', newIndex);
+          
+          // FIRST: Stop tracking for the previous video to accumulate watch time
+          const prevIndex = playingIndexRef.current;
+          if (prevIndex >= 0) {
+            stopProgressUpdates(prevIndex);
+          }
+          
+          // NOW: Track final watch percentage for the previous video
+          const clipsSnapshot = currentClipsRef.current; // Use ref instead of getCurrentClips()
+          console.log('🔍 prevIndex:', prevIndex, 'prevIndex >= 0:', prevIndex >= 0);
+          if (prevIndex >= 0) {
+            const prevVideoRef = videoRefs.current[prevIndex];
+            const prevClip = clipsSnapshot[prevIndex];
+            console.log('🔍 prevVideoRef exists:', !!prevVideoRef, 'prevClip exists:', !!prevClip, 'prevClip:', prevClip);
+            if (prevVideoRef && prevClip) {
+              try {
+                console.log('🔍 Getting video status...');
+                const status = await prevVideoRef.getStatusAsync();
+                console.log('🔍 Status:', {
+                  isLoaded: status.isLoaded,
+                  durationMillis: 'durationMillis' in status ? status.durationMillis : 'N/A',
+                  currentWatchedTime: currentWatchedTime.current
+                });
+                if (status.isLoaded && 'durationMillis' in status && status.durationMillis && status.durationMillis > 0) {
+                  const duration = status.durationMillis / 1000;
+                  const watchedSeconds = currentWatchedTime.current / 1000;
+                  const finalProgress = Math.min(watchedSeconds / duration, 1);
+                  const prevVideoId = clipsSnapshot[prevIndex]?.id;
+                  console.log('🔍 Calculated:', {
+                    duration,
+                    watchedSeconds,
+                    finalProgress,
+                    prevVideoId,
+                    'finalProgress > 0': finalProgress > 0
+                  });
+                  if (prevVideoId && finalProgress > 0) {
+                    const metricsToSend = [{
+                      videoId: prevVideoId,
+                      categories: clipsSnapshot[prevIndex]?.categories || [],
+                      watchPercentage: Math.round(finalProgress * 100),
+                      liked: likedArr[prevIndex] || false,
+                      commented: false
+                    }];
+                    
+                    console.log('📹 VIDEO CHANGE: Sending metrics for video:', prevVideoId, 'watch:', Math.round(finalProgress * 100) + '%');
+                    await sendMetricsDirect(metricsToSend);
+                  } else {
+                    console.log('❌ Not sending: prevVideoId:', prevVideoId, 'finalProgress:', finalProgress);
+                  }
+                } else {
+                  console.log('❌ Video not loaded or no duration');
+                }
+              } catch (error) {
+                console.error('Error getting status on video change:', error);
+              }
             } else {
-              ref.pauseAsync();
+              console.log('❌ prevVideoRef or prevClip missing');
+            }
+          } else {
+            console.log('❌ prevIndex < 0');
+          }
+
+          // Reset tracking for new video
+          currentWatchedTime.current = 0;
+          currentStartTime.current = null;
+          currentVideoMetric.current = null;
+
+          playingIndexRef.current = newIndex; // Update ref immediately
+          setPlayingIndex(newIndex);
+          setIsPlayingArr(arr => arr.map((_, i) => i === newIndex));
+          if (progressAnimations.current[newIndex]) {
+            progressAnimations.current[newIndex].setValue(0);
+          }
+          
+          // Stop progress updates for all other videos
+          progressUpdateIntervals.current.forEach((_, i) => {
+            if (i !== newIndex) {
+              stopProgressUpdates(i);
+            }
+          });
+          
+          // Ensure all videos are properly paused/played
+          videoRefs.current.forEach((ref, i) => {
+            if (ref) {
+              if (i === newIndex) {
+                ref.playAsync().then(() => {
+                  console.log('▶️ Started playing video at index:', newIndex);
+                  // Start tracking AFTER the video starts playing
+                  startProgressUpdates(newIndex);
+                });
+              } else {
+                ref.pauseAsync();
+              }
+            }
+          });
+          
+          // Only prefetch next clip if on "For You" page
+          if (selectedPage === 'forYou') {
+            try {
+              const newVideoId = clipsSnapshot[newIndex]?.id;
+              if (newVideoId && !requestedNextIds.current.has(newVideoId)) {
+                requestedNextIds.current.add(newVideoId);
+                fetchNextClip(1).catch((err) => console.error('Prefetch failed:', err));
+              }
+            } catch (err) {
+              console.error('Error prefetching:', err);
             }
           }
-        });
+        }
       }
-    }
+    })();
   });
 
   const viewConfigRef = React.useRef({ 
@@ -706,6 +791,22 @@ export default function HomeScreen() {
         {/* Caption overlay */}
         <View style={styles.captionContainer}>
           <Text style={styles.captionText}>{item.caption}</Text>
+          {index === playingIndex && (
+            <>
+              <Text style={[styles.captionText, { fontSize: 12, marginTop: 5 }]}>
+                Watched: {(displayWatchedTime / 1000).toFixed(1)}s
+              </Text>
+              <Text style={[styles.captionText, { fontSize: 11, marginTop: 3, color: '#FFD700' }]}>
+                Video ID: {item.id}
+              </Text>
+              <Text style={[styles.captionText, { fontSize: 11, marginTop: 2, color: '#90EE90' }]}>
+                Categories: {item.categories?.join(', ') || 'None'}
+              </Text>
+              <Text style={[styles.captionText, { fontSize: 11, marginTop: 2, color: '#87CEEB' }]}>
+                Page: {selectedPage}
+              </Text>
+            </>
+          )}
         </View>
       </View>
     );
@@ -726,7 +827,7 @@ export default function HomeScreen() {
       <FlatList
         data={getCurrentClips()}
         renderItem={renderItem}
-        keyExtractor={(item) => item.id.toString()}
+        keyExtractor={(item, index) => `${item.id}-${index}`}
         pagingEnabled
         showsVerticalScrollIndicator={false}
         onViewableItemsChanged={onViewableItemsChanged.current}
@@ -787,7 +888,7 @@ export default function HomeScreen() {
 
           <FlatList
             data={comments}
-            keyExtractor={(item) => item.id.toString()}
+            keyExtractor={(item, index) => `comment-${item.id}-${index}`}
             renderItem={({ item }) => (
               <View style={styles.commentItem}>
                 <View style={styles.commentAvatar}>
