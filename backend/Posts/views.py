@@ -84,18 +84,18 @@ def sendVideoMetrics(request):
         return Response({'error': 'No metrics data provided.'}, status=400)
     
     # Print the metrics data to backend console/logs
-    print("Received Video Metrics from user:", user.username)
-    print("Metrics Data:")
+    print("🔄 RECEIVED VIDEO METRICS FROM USER:", user.username)
+    print("📊 METRICS DATA:")
     for metric in metrics_data:
-        print(f"  Video ID: {metric.get('videoId')}")
-        print(f"  Categories: {metric.get('categories', [])}")
-        print(f"  Watch Percentage: {metric.get('watchPercentage', 0)}%")
-        print(f"  Liked: {metric.get('liked', False)}")
-        print(f"  Commented: {metric.get('commented', False)}")
+        print(f"  🎬 Video ID: {metric.get('videoId')}")
+        print(f"  🏷️  Categories: {metric.get('categories', [])}")
+        print(f"  👀 Watch Percentage: {metric.get('watchPercentage', 0)}%")
+        print(f"  ❤️ Liked: {metric.get('liked', False)}")
+        print(f"  💬 Commented: {metric.get('commented', False)}")
         print("  ---")
     
     # Process metrics to update user metadata
-    print("PRODUCTION MODE: Actually saving metadata updates to database")
+    print("💾 PRODUCTION MODE: UPDATING USER METADATA IN DATABASE")
     try:
         user_profile = UserProfile.objects.get(user=user)
         updated_categories = set()
@@ -109,7 +109,7 @@ def sendVideoMetrics(request):
             
             # Check for negative engagement (low watch % with no interaction)
             if 5 <= watch_percentage <= 10 and not liked and not commented:
-                print(f"LOW ENGAGEMENT detected for video {video_id} - applying negative weights")
+                print(f"👎 LOW ENGAGEMENT detected for video {video_id} - applying negative weights")
                 negative_score = -0.3  # Negative penalty for disinterest
                 
                 for category_name in categories:
@@ -123,20 +123,18 @@ def sendVideoMetrics(request):
                         defaults={'weights': 0}
                     )
                     
-                    print(f"  DEBUG: UserMetadata for {category_name} - created: {created}, current weight: {user_metadata.weights}")
+                    print(f"  🔍 UserMetadata for '{category_name}' - created: {created}, current weight: {user_metadata.weights}")
                     
                     # Apply negative weight penalty
                     old_weight = user_metadata.weights
-                    new_weight = max(0, old_weight + negative_score)  # Don't go below 0
+                    new_weight = max(-1, min(1, old_weight + negative_score))  # Clamp between -1 and 1
                     
                     user_metadata.weights = new_weight
                     user_metadata.save()
                     
                     # Verify the save worked
                     user_metadata.refresh_from_db()
-                    print(f"  VERIFIED SAVE: {category_name} weight is now {user_metadata.weights}")
-                    
-                    print(f"  APPLIED NEGATIVE PENALTY {category_name}: {old_weight} + ({negative_score}) = {new_weight}")
+                    print(f"  ✅ UPDATED: {category_name}: {old_weight} + ({negative_score}) = {new_weight} (clamped to [-1,1])")
                     
                     updated_categories.add(category_name)
             else:
@@ -147,11 +145,11 @@ def sendVideoMetrics(request):
                 comment_bonus = (0.2 if commented else 0) / 2  # Comment bonus is halved
                 total_engagement_score = watch_score + like_bonus + comment_bonus
                 
-                print(f"📊 Video {video_id} engagement calculation:")
-                print(f"  Watch %: {watch_percentage}%, Watch Score: {watch_score} (watch% * 0.6)")
-                print(f"  Liked: {liked}, Like Bonus: {like_bonus} (0.2 if liked)")
-                print(f"  Commented: {commented}, Comment Bonus: {comment_bonus} (0.2/2 if commented)")
-                print(f"  Total Engagement Score: {total_engagement_score}")
+                print(f"� Video {video_id} engagement calculation:")
+                print(f"  👀 Watch %: {watch_percentage}%, Watch Score: {watch_score:.3f} (watch% * 0.6)")
+                print(f"  ❤️ Liked: {liked}, Like Bonus: {like_bonus:.1f} (0.2 if liked)")
+                print(f"  💬 Commented: {commented}, Comment Bonus: {comment_bonus:.1f} (0.2/2 if commented)")
+                print(f"  🎯 Total Engagement Score: {total_engagement_score:.3f}")
                 
                 for category_name in categories:
                     # Get or create the VideoCategory category
@@ -164,18 +162,18 @@ def sendVideoMetrics(request):
                         defaults={'weights': 0}
                     )
                     
-                    print(f"  DEBUG: UserMetadata for {category_name} - created: {created}, current weight: {user_metadata.weights}")
+                    print(f"  🔍 UserMetadata for '{category_name}' - created: {created}, current weight: {user_metadata.weights:.3f}")
                     
                     # Apply the mathematical formula: current_weight + engagement_score
                     old_weight = user_metadata.weights
                     user_metadata.weights += total_engagement_score
+                    user_metadata.weights = max(-1, min(1, user_metadata.weights))  # Clamp between -1 and 1
                     user_metadata.save()
                     
                     # Verify the save worked
                     user_metadata.refresh_from_db()
-                    print(f"  VERIFIED SAVE: {category_name} weight is now {user_metadata.weights}")
-                    
-                    print(f"  UPDATED {category_name}: {old_weight} + {total_engagement_score} = {user_metadata.weights}")
+                    clamped_note = " (clamped)" if abs(user_metadata.weights) == 1.0 else ""
+                    print(f"  ✅ UPDATED: {category_name}: {old_weight:.3f} + {total_engagement_score:.3f} = {user_metadata.weights:.3f}{clamped_note} (range: -1 to 1)")
                     
                     updated_categories.add(category_name)
         
@@ -197,10 +195,20 @@ def sendVideoMetrics(request):
                 # Optionally, you could store this average or use it for recommendations
                 # For now, just log it
         
+        # Print final summary of all user metadata
+        print("📋 FINAL USER METADATA SUMMARY FOR USER:", user.username)
+        all_metadata = UserMetadata.objects.filter(name=user_profile).select_related('categories')
+        if all_metadata.exists():
+            print(f"  Total metadata entries: {all_metadata.count()}")
+            for entry in all_metadata:
+                print(f"    🏷️  {entry.categories.name}: {entry.weights} (range: -1 to 1)")
+        else:
+            print("  No metadata entries found")
+        
     except UserProfile.DoesNotExist:
-        print(f"UserProfile not found for user {user.username}")
+        print(f"❌ UserProfile not found for user {user.username}")
     except Exception as e:
-        print(f"Error updating user metadata: {str(e)}")
+        print(f"❌ Error updating user metadata: {str(e)}")
     
     return Response({
         'message': 'Video metrics received and metadata updated successfully. Check backend logs for details.',
