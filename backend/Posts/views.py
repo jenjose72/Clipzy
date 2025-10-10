@@ -64,15 +64,66 @@ def get_next_clip(request):
         )
         user_data = user_data.reindex(columns=categories, fill_value=0)
 
+    # Merge server-side watched IDs into exclude_ids so we don't re-serve clips to the same user
     try:
-        result = next_clip(user_data, count=count, exclude_ids=exclude_ids)
+        if hasattr(user_profile, 'watched_ids'):
+            try:
+                if isinstance(user_profile.watched_ids, list):
+                    watched_list = [int(x) for x in user_profile.watched_ids if x is not None]
+                else:
+                    import json
+                    try:
+                        watched_list = [int(x) for x in json.loads(user_profile.watched_ids or '[]')]
+                    except Exception:
+                        watched_list = []
+                # merge
+                exclude_ids = list(set(exclude_ids) | set(watched_list))
+                print(f"get_next_clip: merged watched_ids into exclude_ids: {exclude_ids}")
+            except Exception as e:
+                print(f"get_next_clip: error reading watched_ids: {e}")
+    except Exception:
+        # no-op if user_profile doesn't have watched_ids
+        pass
+
+    try:
+        result, method_used, top_categories = next_clip(user_data, count=count, exclude_ids=exclude_ids)
+        # Log which selection method was used and the categories chosen
+        print(f"next_clip selected method: {method_used}; categories: {top_categories}")
     except Exception as e:
         return Response(
             {"error": str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
-    return Response({"clips": result}, status=status.HTTP_200_OK)
+    # Record these clips as "watched/shown" for this user so we don't re-serve them
+    try:
+        returned_ids = [c.get('id') for c in result]
+        # user_profile may have watched_ids as JSONField (list) or TextField storing JSON string
+        if hasattr(user_profile, 'watched_ids'):
+            try:
+                # If it's a list-like field
+                if isinstance(user_profile.watched_ids, list):
+                    existing = set(user_profile.watched_ids)
+                    existing.update([i for i in returned_ids if i is not None])
+                    user_profile.watched_ids = list(existing)
+                else:
+                    # assume text field with JSON string
+                    import json
+                    try:
+                        existing_list = json.loads(user_profile.watched_ids or '[]')
+                    except Exception:
+                        existing_list = []
+                    existing = set(existing_list)
+                    existing.update([i for i in returned_ids if i is not None])
+                    user_profile.watched_ids = json.dumps(list(existing))
+                user_profile.save()
+                print(f"Marked clips as watched for user {user.username}: {returned_ids}")
+            except Exception as e:
+                print(f"Failed to update watched_ids for user {user.username}: {e}")
+    except Exception as e:
+        print(f"Error recording watched ids: {e}")
+
+    return Response({"clips": result, "method": method_used, "categories": top_categories}, status=status.HTTP_200_OK)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])

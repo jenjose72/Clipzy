@@ -315,7 +315,7 @@ export default function HomeScreen() {
   const fetchNewCreatorsClips = async () => {
     try {
       const token = await AsyncStorage.getItem('accessToken');
-      const response = await fetch(`${backendUrl}/features/fetchClips/`, {
+      const response = await fetch(`${backendUrl}/features/fetchClips/?type=newCreators`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -851,7 +851,14 @@ export default function HomeScreen() {
       <View style={styles.pageSelectorOverlay}>
         <TouchableOpacity
           style={[styles.pageButtonOverlay, selectedPage === 'forYou' && styles.pageButtonOverlayActive]}
-          onPress={() => handlePageSwitch('forYou')}
+          onPress={() => {
+            if (selectedPage === 'forYou') {
+              // already on For You, refresh the feed
+              onRefresh();
+            } else {
+              handlePageSwitch('forYou');
+            }
+          }}
         >
           <Text style={[styles.pageButtonTextOverlay, selectedPage === 'forYou' && styles.pageButtonTextOverlayActive]}>
             For You

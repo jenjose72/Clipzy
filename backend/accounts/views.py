@@ -71,17 +71,58 @@ def getProfileInfo(request):
             "dob": userProfile.dob,
             "userId": user.id,
             "username": user.username,
+            "profile_pic": userProfile.profile_pic,
+            "bio": userProfile.bio,
             "followers": followers,
             "following": following
         }
         return Response(profile_data, status=200)
     except UserProfile.DoesNotExist:
         return Response({"error": "User profile does not exist."}, status=404)
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def updateProfilePic(request):
+    """Accepts JSON { "profile_pic": "<cloudinary_url>" } and saves to the UserProfile.
+    Uses DRF authentication so `request.user` is populated the same way as other views.
+    """
+    try:
+        user = request.user
+        userProfile = UserProfile.objects.get(user=user)
+        pic_url = request.data.get('profile_pic')
+        if not pic_url:
+            return Response({"error": "profile_pic is required"}, status=400)
+        userProfile.profile_pic = pic_url
+        userProfile.save()
+        return Response({"message": "Profile picture updated", "profile_pic": pic_url}, status=200)
+    except UserProfile.DoesNotExist:
+        return Response({"error": "User profile does not exist."}, status=404)
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
     
 def getUserFollowersAndFollowing(user):
     followers = Follows.objects.filter(following=user).count()
     following = Follows.objects.filter(follower=user).count()
     return followers, following
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def updateBio(request):
+    """Accepts JSON { "bio": "..." } and updates the user's profile bio."""
+    try:
+        user = request.user
+        userProfile = UserProfile.objects.get(user=user)
+        bio_text = request.data.get('bio', '')
+        userProfile.bio = bio_text
+        userProfile.save()
+        return Response({"message": "Bio updated", "bio": bio_text}, status=200)
+    except UserProfile.DoesNotExist:
+        return Response({"error": "User profile does not exist."}, status=404)
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
 
 
 @api_view(['POST'])
@@ -125,6 +166,7 @@ def getOtherUserProfileInfo(request):
             "dob": userProfile.dob,
             "userId": user.id,
             "username": user.username,
+            "bio": userProfile.bio,
             "followers": followers,
             "following": following
         }
