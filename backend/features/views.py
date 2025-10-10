@@ -210,7 +210,7 @@ def postClip(request):
             pass
     else:
         final_labels = []
-    clip = Clip.objects.create(caption=description, clipUrl=video_url)
+    clip = Clip.objects.create(caption=description, clipUrl=video_url, uploader=user)
     # Tagging logic for categories
     from .models import VideoCategory, TaggedVideo
     for label, _ in final_labels:
@@ -221,10 +221,12 @@ def postClip(request):
         'labels': final_labels,
     })
 
+
 @api_view(['GET'])
-@permission_classes([AllowAny])
-def fetchClips(request):
-    clips = Clip.objects.all().order_by('-created_at')
+@permission_classes([IsAuthenticated])
+def getMyClips(request):
+    user = request.user
+    clips = Clip.objects.filter(uploader=user).order_by('-created_at')
     clips_data = []
     for clip in clips:
         categories = clip.tags.all().values_list('category__name', flat=True)
@@ -234,11 +236,68 @@ def fetchClips(request):
             'clipUrl': clip.clipUrl,
             'likeCount': clip.likeCount,
             'created_at': clip.created_at,
-            'categories': list(categories)
+            'categories': list(categories),
+            'uploader': {
+                'id': clip.uploader.id if clip.uploader else None,
+                'username': clip.uploader.username if clip.uploader else None,
+            }
+        })
+    return Response({'clips': clips_data}, status=200)
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def fetchClips(request):
+    # support an optional `type=newCreators` query param to return a feed of newer/smaller creators
+    feed_type = request.GET.get('type')
+    if feed_type == 'newCreators':
+        # define new creators as uploaders with relatively few followers (threshold = 10)
+        from django.contrib.auth.models import User
+        from django.db.models import Count
+
+        users = User.objects.annotate(followers_count=Count('followers')).filter(followers_count__lte=10)
+        clips = Clip.objects.filter(uploader__in=users).order_by('-created_at')
+    else:
+        clips = Clip.objects.all().order_by('-created_at')
+    clips_data = []
+    for clip in clips:
+        categories = clip.tags.all().values_list('category__name', flat=True)
+        clips_data.append({
+            'id': clip.id,
+            'caption': clip.caption,
+            'clipUrl': clip.clipUrl,
+            'likeCount': clip.likeCount,
+            'created_at': clip.created_at,
+            'categories': list(categories),
+            'uploader': {
+                'id': clip.uploader.id if clip.uploader else None,
+                'username': clip.uploader.username if clip.uploader else None,
+            }
         })
     return Response({
         'clips': clips_data
     })
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def getClip(request):
+    clip_id = request.GET.get('id')
+    if not clip_id:
+        return Response({'error': 'id is required'}, status=400)
+    try:
+        clip = Clip.objects.get(id=clip_id)
+        categories = clip.tags.all().values_list('category__name', flat=True)
+        clip_data = {
+            'id': clip.id,
+            'caption': clip.caption,
+            'clipUrl': clip.clipUrl,
+            'likeCount': clip.likeCount,
+            'created_at': clip.created_at,
+            'categories': list(categories)
+        }
+        return Response({'clip': clip_data}, status=200)
+    except Clip.DoesNotExist:
+        return Response({'error': 'Clip not found'}, status=404)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -258,5 +317,10 @@ def getLikedVideos(request):
             'categories': list(categories),
             'liked_at': like.created_at
         })
+        # include uploader info
+        liked_videos_data[-1]['uploader'] = {
+            'id': clip.uploader.id if clip.uploader else None,
+            'username': clip.uploader.username if clip.uploader else None,
+        }
     return Response({'liked_videos': liked_videos_data}, status=200)
 

@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { Video, ResizeMode } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
+import ClipzyLogo from '@/components/icons/clipzyLogo';
 import { useRouter } from 'expo-router';
 import { backendUrl } from '@/constants/Urls';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -260,7 +261,7 @@ const Upload = () => {
       <View style={styles.content}>
         <View style={styles.uploadContainer}>
           <View style={styles.uploadIcon}>
-            <Ionicons name="videocam" size={80} color="#4F8EF7" />
+            <ClipzyLogo width={150} height={150} />
           </View>
           <Text style={styles.uploadTitle}>Select a video to upload</Text>
           <Text style={styles.uploadSubtitle}>
@@ -350,14 +351,14 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   selectButton: {
-    backgroundColor: '#4F8EF7',
+    backgroundColor: '#000000ff',
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 24,
     paddingVertical: 16,
     borderRadius: 12,
     marginBottom: 32,
-    gap: 8,
+    gap: 4,
   },
   selectButtonText: {
     color: '#fff',

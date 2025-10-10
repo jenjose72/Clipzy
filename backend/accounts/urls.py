@@ -1,5 +1,6 @@
 from django.urls import path
-from .views import Signup, home, getProfileInfo, getOtherUserProfileInfo, request_otp, verify_otp
+from .views import Signup, home, getProfileInfo, getOtherUserProfileInfo, request_otp, verify_otp, updateProfilePic
+from .views import updateBio
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 urlpatterns = [
@@ -8,6 +9,8 @@ urlpatterns = [
     # path('login/', login, name='login'),
     path('home/', home, name='home'),
     path('profile/', getProfileInfo, name='getProfileInfo'),
+    path('update_profile_pic/', updateProfilePic, name='updateProfilePic'),
+    path('update_bio/', updateBio, name='updateBio'),
     path('token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('getOtherProfile/', getOtherUserProfileInfo, name='getOtherProfile')

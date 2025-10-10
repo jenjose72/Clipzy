@@ -13,6 +13,8 @@ from .views import (
     removeComment,
     getComments,
     getLikedVideos,
+    getMyClips,
+    getClip,
 )
 
 urlpatterns = [
@@ -28,5 +30,7 @@ urlpatterns = [
     path('getComments/',getComments, name='getComments'),
     path('getLikedVideos/',getLikedVideos, name='getLikedVideos'),
     path('postClip/',postClip, name='postClip'),
+    path('myClips/', getMyClips, name='getMyClips'),
+    path('getClip/', getClip, name='getClip'),
     path('fetchClips/',fetchClips, name='fetchClips'),
 ]

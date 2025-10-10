@@ -47,6 +47,14 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <Octicons name="search" size={28} color={color} />,
         }}
       />
+       <Tabs.Screen
+        name="upload"
+        options={{
+          title: 'Upload',
+          tabBarIcon: ({ color }) => <IconSymbol name="plus" size={28} color={color} />,
+          
+         }}
+      />
       <Tabs.Screen
         name='chat'
         options={{
@@ -61,14 +69,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <MaterialIcons name="person" size={28} color={color} />,
         }}
       />
-      <Tabs.Screen
-        name="upload"
-        options={{
-          title: 'Upload',
-          tabBarIcon: ({ color }) => <IconSymbol name="plus" size={28} color={color} />,
-          
-         }}
-      />
+     
        <Tabs.Screen
         name="chatRoom"
         options={{ href: null }}
@@ -83,6 +84,10 @@ export default function TabLayout() {
       />
        <Tabs.Screen
         name="chatRoom/[roomId]"
+        options={{ href: null }}
+      />
+      <Tabs.Screen
+        name="clip/[clipId]"
         options={{ href: null }}
       />
     </Tabs>
