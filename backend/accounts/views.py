@@ -167,6 +167,7 @@ def getOtherUserProfileInfo(request):
             "userId": user.id,
             "username": user.username,
             "bio": userProfile.bio,
+            "profile_pic": userProfile.profile_pic,
             "followers": followers,
             "following": following
         }

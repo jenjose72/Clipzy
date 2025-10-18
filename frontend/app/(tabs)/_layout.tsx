@@ -88,7 +88,10 @@ export default function TabLayout() {
       />
       <Tabs.Screen
         name="clip/[clipId]"
-        options={{ href: null }}
+        options={{ tabBarStyle: {
+            backgroundColor: '#000',
+          },href: null }}
+        
       />
     </Tabs>
   );

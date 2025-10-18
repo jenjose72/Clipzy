@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Image } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { backendUrl } from '@/constants/Urls';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -13,8 +14,13 @@ const ChatRoomPage = () => {
 	const [loading, setLoading] = useState(true);
 	const [user, setUser] = useState('');
 	const [userId, setUserId] = useState<string | null>(null);
+	const [otherParticipant, setOtherParticipant] = useState<any | null>(null);
+	const [failedAvatar, setFailedAvatar] = useState<Record<string, boolean>>({});
+	// no thumbnail cache: keep message preview simple
 	const ws = useRef<WebSocket | null>(null);
 	const [wsReady, setWsReady] = useState(false);
+	const messagesRef = useRef<any[]>([]);
+	const router = useRouter();
 
 	useEffect(() => {
 		AsyncStorage.getItem('user').then(u => u && setUser(u));
@@ -38,6 +44,45 @@ const ChatRoomPage = () => {
 	}, []);
 
 	useEffect(() => {
+		// fetch room participants to find the other user and their profile pic
+		const fetchRoomParticipants = async () => {
+			if (!roomId || !userId) return;
+			try {
+				const token = await AsyncStorage.getItem('accessToken');
+				const res = await fetch(`${backendUrl}/chat/getChats/`, {
+					method: 'GET',
+					headers: {
+						'Authorization': `Bearer ${token}`,
+						'Content-Type': 'application/json',
+					},
+				});
+				const data = await res.json().catch(() => null);
+				if (res.ok && data?.chat_rooms) {
+					const room = data.chat_rooms.find((r: any) => String(r.room_id) === String(roomId));
+					if (room) {
+						const parts = room.participants || room.users || [];
+						let other = null;
+						if (Array.isArray(parts) && parts.length > 0) {
+							if (typeof parts[0] === 'object') {
+								other = parts.find((p: any) => String(p.user_id) !== String(userId)) || parts[0];
+							} else {
+								const uname = parts.find((p: any) => String(p) !== String(userId)) || parts[0];
+								other = { username: uname };
+							}
+							if (other) {
+								setOtherParticipant(other);
+							}
+						}
+					}
+				}
+			} catch (e) {
+				// ignore
+			}
+		};
+		fetchRoomParticipants();
+	}, [roomId, userId]);
+
+	useEffect(() => {
 		// Fetch initial messages (optional, if you want to show history)
 		const fetchMessages = async () => {
 			setLoading(true);
@@ -55,7 +100,9 @@ const ChatRoomPage = () => {
 					setMessages(
 						data.messages.map((msg: any) => ({
 							text: msg.content,
-							sender: msg.sender.toString() === userId ? 'me' : msg.sender.toString()
+							sender: msg.sender.toString() === userId ? 'me' : msg.sender.toString(),
+							video: msg.video || null,
+							id: msg.id || null,
 						}))
 					);
 				}
@@ -76,8 +123,9 @@ const ChatRoomPage = () => {
 		ws.current.onmessage = (e) => {
 			try {
 				const data = JSON.parse(e.data);
-				if (data.message) {
-					setMessages(prev => [...prev, { text: data.message, sender: data.sender.toString() === userId ? 'me' : data.sender.toString() }]);
+				if (data.message || data.video) {
+					const msg = { text: data.message || '', sender: data.sender?.toString() === userId ? 'me' : data.sender?.toString(), video: data.video || null };
+					appendMessage(msg);
 				}
 			} catch {}
 		};
@@ -87,35 +135,86 @@ const ChatRoomPage = () => {
 	}, [roomId, userId]);
 
 	const sendMessage = async () => {
-		if (input.trim() && wsReady && userId) {
-			ws.current?.send(JSON.stringify({ message: input, sender: userId }));
+		if (!input.trim() || !userId) return;
+
+		// optimistic UI update so user sees message immediately
+		setMessages(prev => [...prev, { text: input, sender: 'me' }]);
+
+		// Try to send over websocket if available
+		if (wsReady && ws.current) {
 			try {
-				const token = await AsyncStorage.getItem('accessToken');
-				await fetch(`${backendUrl}/chat/sendMessage/`, {
-					method: 'POST',
-					headers: {
-						'Authorization': `Bearer ${token}`,
-						'Content-Type': 'application/json',
-					},
-					body: JSON.stringify({ room_id: roomId, content: input }),
-				});
-			} catch {}
-			setInput('');
+				ws.current.send(JSON.stringify({ message: input, sender: userId }));
+				console.log('sent via websocket', { roomId, input });
+			} catch (e) {
+				console.log('websocket send failed, will POST instead', e);
+			}
+		} else {
+			console.log('websocket not ready, sending via REST only');
 		}
+
+		// Always POST to the REST endpoint as a fallback / persistence
+		try {
+			const token = await AsyncStorage.getItem('accessToken');
+			const res = await fetch(`${backendUrl}/chat/sendMessage/`, {
+				method: 'POST',
+				headers: {
+					'Authorization': `Bearer ${token}`,
+					'Content-Type': 'application/json',
+				},
+				body: JSON.stringify({ room_id: roomId, content: input }),
+			});
+			const data = await res.json().catch(() => null);
+			if (!res.ok) console.log('POST sendMessage failed', data);
+			else console.log('POST sendMessage succeeded', data);
+		} catch (e) {
+			console.log('POST sendMessage error', e);
+		}
+
+		setInput('');
 	};
+
+	// keep a ref copy of messages to avoid stale closures during websocket callbacks
+	useEffect(() => {
+		messagesRef.current = messages;
+	}, [messages]);
+
+	const isDuplicateMessage = (msg: { text: string; sender: string }) => {
+		// check last 6 messages for same text & sender
+		const recent = messagesRef.current.slice(-6);
+		return recent.some(m => m.text === msg.text && m.sender === msg.sender);
+	};
+
+	const appendMessage = (msg: { text: string; sender: string }) => {
+		if (isDuplicateMessage(msg)) {
+			console.log('duplicate message ignored', msg);
+			return;
+		}
+		setMessages(prev => [...prev, msg]);
+	};
+
+
+
 
 		return (
 			<SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
 				<View style={styles.header}>
 					<View style={{ flexDirection: 'row', alignItems: 'center' }}>
-						<TouchableOpacity style={{ padding: 8 }} onPress={() => history.back()}>
+						<TouchableOpacity style={{ padding: 8 }} onPress={() => router.back()}>
 							<MaterialIcons name="arrow-back-ios" size={20} color="#111" />
 						</TouchableOpacity>
 						<View style={{ width: 8 }} />
-						<View style={styles.avatarSmall} />
+						{otherParticipant && (otherParticipant.profile_pic || otherParticipant.avatar) ? (
+							<Image
+								source={{ uri: String(otherParticipant.profile_pic || otherParticipant.avatar).startsWith('http') ? String(otherParticipant.profile_pic || otherParticipant.avatar) : `${backendUrl}${String(otherParticipant.profile_pic || otherParticipant.avatar)}` }}
+								style={styles.avatarSmall}
+								resizeMode="cover"
+								onError={() => setFailedAvatar(prev => ({ ...prev, room: true }))}
+							/>
+						) : (
+							<View style={styles.avatarSmall} />
+						)}
 						<View style={{ marginLeft: 10 }}>
-							<Text style={styles.headerName}>Helena Hills</Text>
-							<Text style={styles.headerStatus}>Active 11m ago</Text>
+							<Text style={styles.headerName}>{otherParticipant?.name || otherParticipant?.username || 'Chat'}</Text>
 						</View>
 					</View>
 
@@ -146,10 +245,29 @@ const ChatRoomPage = () => {
 						const isMe = item.sender === 'me';
 						return (
 							<View style={{ flexDirection: 'row', marginVertical: 6, alignItems: 'flex-end' }}>
-								{!isMe && <View style={styles.msgAvatar} />}
+								{!isMe && (
+									(otherParticipant && (otherParticipant.profile_pic || otherParticipant.avatar)) ? (
+										<Image
+											source={{ uri: String(otherParticipant.profile_pic || otherParticipant.avatar).startsWith('http') ? String(otherParticipant.profile_pic || otherParticipant.avatar) : `${backendUrl}${String(otherParticipant.profile_pic || otherParticipant.avatar)}` }}
+											style={styles.msgAvatar}
+											resizeMode="cover"
+											onError={() => setFailedAvatar(prev => ({ ...prev, roomMsg: true }))}
+										/>
+									) : (
+										<View style={styles.msgAvatar} />
+									)
+								)}
 								<View style={{ flex: 1, alignItems: isMe ? 'flex-end' : 'flex-start' }}>
 									<View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleOther]}>
-										<Text style={[styles.bubbleText, isMe ? { color: '#fff' } : { color: '#111' }]}>{item.text}</Text>
+										{item.text ? (
+											<Text style={[styles.bubbleText, isMe ? { color: '#fff' } : { color: '#111' }]}>{item.text}</Text>
+										) : null}
+										{item.video ? (
+											<TouchableOpacity onPress={() => router.push(`/(tabs)/clip/${item.video}`)} style={styles.videoPreviewWrap}>
+												<View style={styles.videoDot} />
+												<Text style={styles.videoLabel}>View clip</Text>
+											</TouchableOpacity>
+										) : null}
 									</View>
 								</View>
 								{isMe && <View style={{ width: 36 }} />}
@@ -168,7 +286,11 @@ const ChatRoomPage = () => {
 						placeholderTextColor="#999"
 					/>
 					<TouchableOpacity style={styles.inputIcon}><MaterialIcons name="image" size={22} color="#666" /></TouchableOpacity>
-					<TouchableOpacity style={[styles.sendCircle]} onPress={sendMessage}>
+					<TouchableOpacity
+						style={[styles.sendCircle, { opacity: input.trim() ? 1 : 0.5 }]}
+						onPress={sendMessage}
+						disabled={!input.trim()}
+					>
 						<MaterialIcons name="send" size={20} color="#fff" />
 					</TouchableOpacity>
 				</View>
@@ -224,6 +346,29 @@ const styles = StyleSheet.create({
 		fontSize: 16,
 		borderWidth: 1,
 		borderColor: '#dbeafe',
+		marginRight: 8,
+	},
+	videoPreviewWrap: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		marginTop: 8,
+	},
+	videoDot: {
+		width: 28,
+		height: 28,
+		borderRadius: 6,
+		backgroundColor: '#111',
+		marginRight: 8,
+	},
+	videoLabel: {
+		color: '#fff',
+		fontWeight: '700',
+	},
+	videoThumb: {
+		width: 140,
+		height: 80,
+		borderRadius: 8,
+		backgroundColor: '#111',
 		marginRight: 8,
 	},
 	sendBtn: {

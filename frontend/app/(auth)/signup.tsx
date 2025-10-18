@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { View, Text, TextInput, Pressable, ActivityIndicator, TouchableOpacity } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -9,12 +9,12 @@ import { backendUrl } from '@/constants/Urls';
 import ClipzyLogo from '@/components/icons/clipzyLogo';
 // Using a simple text logo placeholder here to avoid changing the ClipzyLogo component
 
-type Step = 1 | 2 | 3;
+type Step = 1 | 3;
 
 export default function Signup() {
   const [step, setStep] = useState<Step>(1);
   const [email, setEmail] = useState('');
-  const [otp, setOtp] = useState('');
+  // OTP flow removed — we skip verification and go straight to personal details
   const [username, setUsername] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [password, setPassword] = useState('');
@@ -22,41 +22,31 @@ export default function Signup() {
   const [dob, setDob] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const hiddenOtpInput = useRef<TextInput | null>(null);
+  
   const router = useRouter();
   const { login } = useAuth();
 
   const handleBack = () => {
     if (step > 1) {
       setError('');
-      // clear OTP when stepping back to step 1
-      if (step === 2) setOtp('');
-      setStep((s) => (s - 1) as Step);
+      setStep(1);
     } else {
       router.back();
     }
   };
 
+  // simplified: skip OTP and go straight to personal details
   const requestOtp = () => {
     setError('');
     if (!email) return setError('Please enter your email');
     setLoading(true);
-    // dummy
-    setTimeout(() => {
-      setLoading(false);
-      setStep(2);
-    }, 600);
-  };
-
-  const verifyOtp = () => {
-    setError('');
-    if (!otp || otp.length < 6) return setError('Please enter the 6-digit pin');
-    setLoading(true);
     setTimeout(() => {
       setLoading(false);
       setStep(3);
-    }, 400);
+    }, 250);
   };
+
+  // OTP verification removed
 
   const handleSignup = async () => {
     setError('');
@@ -102,26 +92,7 @@ export default function Signup() {
     </Pressable>
   );
 
-  const renderPinBoxes = () => {
-    const digits = otp.split('');
-    return (
-      <View style={{ flexDirection: 'row', alignSelf: 'center', marginTop: 18, alignItems: 'center' }}>
-        {Array.from({ length: 3 }).map((_, i) => (
-          <View key={i} style={{ width: 48, height: 48, backgroundColor: '#6C5CE7', marginHorizontal: 6, borderRadius: 6, justifyContent: 'center', alignItems: 'center' }}>
-            <Text style={{ color: 'white', fontWeight: '700', fontSize: 18 }}>{digits[i] ?? ''}</Text>
-          </View>
-        ))}
-
-        <Text style={{ width: 12, textAlign: 'center', marginHorizontal: 6, fontSize: 18 }}>-</Text>
-
-        {Array.from({ length: 3 }).map((_, i) => (
-          <View key={i + 3} style={{ width: 48, height: 48, backgroundColor: '#6C5CE7', marginHorizontal: 6, borderRadius: 6, justifyContent: 'center', alignItems: 'center' }}>
-            <Text style={{ color: 'white', fontWeight: '700', fontSize: 18 }}>{digits[i + 3] ?? ''}</Text>
-          </View>
-        ))}
-      </View>
-    );
-  };
+  
 
   return (
     <SafeAreaView style={{ flex: 1, padding: 20 }} edges={['top', 'left', 'right']}>
@@ -133,7 +104,7 @@ export default function Signup() {
       {step === 1 && (
         <>
           <View style={{ alignItems: 'center', marginTop: 12 }}>
-           <ClipzyLogo width={120} height={160} style={{ opacity: 1 }} />
+           <ClipzyLogo xml={null} width={120} height={160} style={{ opacity: 1 }} />
           </View>
 
           <Text style={{ fontSize: 18, fontWeight: '700', marginTop: 22, textAlign: 'center' }}>Create an account</Text>
@@ -161,41 +132,12 @@ export default function Signup() {
         </>
       )}
 
-      {step === 2 && (
-        <>
-          <View style={{ alignItems: 'center', marginTop: 6 }}>
-           <ClipzyLogo width={120} height={160} style={{ opacity: 1 }} />
-          </View>
-
-          <Text style={{ fontSize: 16, fontWeight: '700', marginTop: 18, textAlign: 'center' }}>Enter security pin sent to your email</Text>
-
-          <TouchableOpacity activeOpacity={1} onPress={() => hiddenOtpInput.current?.focus()}>
-            {renderPinBoxes()}
-          </TouchableOpacity>
-
-          {/* Hidden input captures the 6-digit pin */}
-          <TextInput
-            ref={(r) => { hiddenOtpInput.current = r; }}
-            value={otp}
-            onChangeText={(val) => setOtp(val.replace(/[^0-9]/g, '').slice(0, 6))}
-            keyboardType="number-pad"
-            maxLength={6}
-            style={{ position: 'absolute', opacity: 0 }}
-            importantForAutofill="no"
-          />
-
-          <View style={{ marginTop: 28 }}>
-            <PrimaryButton title="Continue" onPress={verifyOtp} />
-          </View>
-
-          <Text style={{ textAlign: 'center', color: '#666', marginTop: 14 }}>not your email? <Text style={{ textDecorationLine: 'underline' }} onPress={() => { setStep(1); setOtp(''); }}>change it now</Text></Text>
-        </>
-      )}
+      {/* OTP step removed — we skip verification and go straight to personal details */}
 
       {step === 3 && (
         <>
           <View style={{ alignItems: 'center', marginTop: 6 }}>
-            <ClipzyLogo width={120} height={160} style={{ opacity: 1 }} />
+            <ClipzyLogo xml={null} width={120} height={160} style={{ opacity: 1 }} />
           </View>
 
           <Text style={{ fontSize: 18, fontWeight: '700', marginTop: 18, textAlign: 'center' }}>Personal Details</Text>

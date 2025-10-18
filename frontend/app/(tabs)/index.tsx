@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { StyleSheet, View, Dimensions, TouchableWithoutFeedback, FlatList, TouchableOpacity, SafeAreaView, Modal, TextInput, KeyboardAvoidingView, Platform, Alert, Text, Animated, Easing, RefreshControl } from 'react-native';
+import { StyleSheet, View, Dimensions, TouchableWithoutFeedback, FlatList, TouchableOpacity, SafeAreaView, Modal, TextInput, KeyboardAvoidingView, Platform, Alert, Text, Animated, Easing, RefreshControl, Share, Switch } from 'react-native';
 import { useAuth } from '../../components/AuthContext';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -37,6 +37,11 @@ export default function HomeScreen() {
   const [snackbarMessage, setSnackbarMessage] = useState('');
   const [displayWatchedTime, setDisplayWatchedTime] = useState(0);
   const currentVideoMetric = useRef<any>(null);
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [followersList, setFollowersList] = useState<any[]>([]);
+  const [selectedFollowers, setSelectedFollowers] = useState<Record<string, boolean>>({});
+  const [sharing, setSharing] = useState(false);
+  const [shareStep, setShareStep] = useState<'menu'|'followers'>('menu');
 
   useEffect(() => {
     if (!user) {
@@ -339,6 +344,19 @@ export default function HomeScreen() {
     }
   };
 
+  const loadFollowers = async () => {
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      const res = await fetch(`${backendUrl}/chat/getChats/`, { method: 'GET', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } });
+      const data = await res.json();
+      const following = data.following || [];
+      setFollowersList(following);
+      const sel: Record<string, boolean> = {};
+      following.forEach((f: any) => { sel[String(f.user_id || f.id || f.username)] = false; });
+      setSelectedFollowers(sel);
+    } catch (e) { console.log('Error fetching following', e); }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
     try {
@@ -549,6 +567,12 @@ export default function HomeScreen() {
     setCurrentVideoIndex(index);
     setCommentModalVisible(true);
     fetchComments(index);
+  };
+
+  const handleSharePress = (index: number) => {
+    setCurrentVideoIndex(index);
+      loadFollowers();
+    setShareModalVisible(true);
   };
 
   const fetchComments = async (videoIndex: number) => {
@@ -784,7 +808,7 @@ export default function HomeScreen() {
           <TouchableOpacity style={styles.featureButton} onPress={() => handleCommentPress(index)}>
             <Fontisto name="comment" size={24} color="white" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.featureButton}>
+          <TouchableOpacity style={styles.featureButton} onPress={() => handleSharePress(index)}>
             <Feather name="share" size={28} color="white" />
           </TouchableOpacity>
         </SafeAreaView>
@@ -949,6 +973,107 @@ export default function HomeScreen() {
           </Snackbar>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Share Modal */}
+      <Modal visible={shareModalVisible} animationType="slide">
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#f8f9fa' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomColor: '#e0e0e0', borderBottomWidth: 1, backgroundColor: '#fff' }}>
+            <TouchableOpacity onPress={() => setShareModalVisible(false)} style={{ padding: 8 }}>
+              <Ionicons name="close" size={24} color="#333" />
+            </TouchableOpacity>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: '#111' }}>Send to followers</Text>
+            <View style={{ width: 40 }} />
+          </View>
+
+          <View style={{ flex: 1, paddingHorizontal: 12, paddingTop: 12 }}>
+            <Text style={{ fontSize: 14, color: '#666', marginBottom: 12, paddingHorizontal: 4 }}>Select followers to share this clip:</Text>
+            <FlatList 
+              data={followersList} 
+              keyExtractor={(it) => String(it.user_id || it.id || it.username)} 
+              onEndReachedThreshold={0.1}
+              scrollEnabled={followersList.length > 4}
+              renderItem={({ item }) => {
+                const id = String(item.user_id || item.id || item.username);
+                const isSelected = !!selectedFollowers[id];
+                return (
+                  <TouchableOpacity 
+                    onPress={() => setSelectedFollowers(prev => ({ ...prev, [id]: !prev[id] }))}
+                    style={{ 
+                      flexDirection: 'row', 
+                      alignItems: 'center', 
+                      paddingVertical: 12, 
+                      paddingHorizontal: 12, 
+                      marginBottom: 8, 
+                      backgroundColor: isSelected ? '#e3f2fd' : '#fff',
+                      borderRadius: 12,
+                      borderWidth: 1.5,
+                      borderColor: isSelected ? '#4F8EF7' : '#e0e0e0'
+                    }}
+                  >
+                    <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#ddd', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                      <Text style={{ fontSize: 18, fontWeight: '700', color: '#666' }}>
+                        {(item.name || item.username).charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontWeight: '600', fontSize: 15, color: '#111' }}>{item.name || item.username}</Text>
+                      <Text style={{ fontSize: 13, color: '#999', marginTop: 2 }}>@{item.username}</Text>
+                    </View>
+                    <View style={{ width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: isSelected ? '#4F8EF7' : '#ddd', backgroundColor: isSelected ? '#4F8EF7' : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
+                      {isSelected && <Ionicons name="checkmark" size={14} color="#fff" />}
+                    </View>
+                  </TouchableOpacity>
+                );
+              }} 
+            />
+          </View>
+
+          <View style={{ paddingHorizontal: 16, paddingBottom: 20, paddingTop: 12, borderTopColor: '#e0e0e0', borderTopWidth: 1, backgroundColor: '#fff', flexDirection: 'row', gap: 8 }}>
+            <TouchableOpacity 
+              style={{ flex: 1, backgroundColor: '#f0f0f0', paddingVertical: 13, paddingHorizontal: 16, borderRadius: 10, alignItems: 'center' }} 
+              onPress={() => setShareModalVisible(false)}
+            >
+              <Text style={{ fontWeight: '700', color: '#333', fontSize: 15 }}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={{ 
+                flex: 1, 
+                backgroundColor: '#4F8EF7', 
+                paddingVertical: 13, 
+                paddingHorizontal: 16, 
+                borderRadius: 10, 
+                alignItems: 'center',
+                opacity: sharing ? 0.6 : 1
+              }} 
+              disabled={sharing || Object.values(selectedFollowers).every(v => !v)}
+              onPress={async () => {
+                try {
+                  setSharing(true);
+                  const token = await AsyncStorage.getItem('accessToken');
+                  const currentClips = getCurrentClips();
+                  const currentClip = currentClips[currentVideoIndex];
+                  const selectedIds = Object.keys(selectedFollowers).filter(k => selectedFollowers[k]);
+                  for (const sid of selectedIds) {
+                    try {
+                      const cr = await fetch(`${backendUrl}/chat/createRoom/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ participant_id: sid }) });
+                      const crd = await cr.json().catch(() => null);
+                      const roomId = crd?.room_id;
+                      if (roomId) {
+                        await fetch(`${backendUrl}/chat/sendMessage/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ room_id: roomId, content: '', video_id: currentClip?.id }) });
+                      }
+                    } catch (e) { console.log('Error creating room/sending', e); }
+                  }
+                } catch (e) { console.log('Share to followers error', e); }
+                setSharing(false);
+                setShareModalVisible(false);
+                setSelectedFollowers({});
+              }}
+            >
+              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>{sharing ? 'Sending...' : 'Send'}</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1043,7 +1168,7 @@ const styles = StyleSheet.create({
   },
   pageSelectorOverlay: {
     position: 'absolute',
-    top: 10, // Adjust for SafeAreaView
+    top: 30, // Adjust for SafeAreaView
     left: 0,
     right: 0,
     flexDirection: 'row',

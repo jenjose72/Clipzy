@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from django.contrib.auth.models import User
 from features.models import Follows
 from .models import ChatRoom, Message
+from accounts.models import UserProfile
 
 
 @api_view(['POST'])
@@ -65,28 +66,48 @@ def getMessages(request, room_id):
 def getChats(request):
     user = request.user
     chat_rooms = ChatRoom.objects.filter(participants=user)
-    if chat_rooms.exists():
-        rooms_data = [
-            {   
-                "roomExists": True,
-                "room_id": room.id,
-                "room_name": room.name,
-                "users": [u.username for u in room.participants.all()]
-            }
-            for room in chat_rooms
-        ]
-        return Response({"chat_rooms": rooms_data})
-    else:
-        following = Follows.objects.filter(follower=user).select_related('following')
-        following_users = [
-            {   
-                "roomExists": False,
-                "user_id": f.following.id,
-                "username": f.following.username
-            }
-            for f in following
-        ]
-        return Response({"message": "No chat rooms found.", "following": following_users})
+    rooms_data = []
+    for room in chat_rooms:
+        participants = []
+        for u in room.participants.all():
+            try:
+                up = UserProfile.objects.get(user=u)
+                participants.append({
+                    'user_id': u.id,
+                    'username': u.username,
+                    'profile_pic': up.profile_pic,
+                    'name': up.name,
+                })
+            except UserProfile.DoesNotExist:
+                participants.append({'user_id': u.id, 'username': u.username})
+
+        rooms_data.append({
+            'roomExists': True,
+            'room_id': room.id,
+            'room_name': room.name,
+            'participants': participants,
+        })
+
+    # always include list of users the current user is following so the client can show
+    # people the user follows even if there are chat rooms
+    following_qs = Follows.objects.filter(follower=user).select_related('following')
+    following_users = []
+    for f in following_qs:
+        try:
+            up = UserProfile.objects.get(user=f.following)
+            following_users.append({
+                'user_id': f.following.id,
+                'username': f.following.username,
+                'profile_pic': up.profile_pic,
+                'name': up.name,
+            })
+        except UserProfile.DoesNotExist:
+            following_users.append({
+                'user_id': f.following.id,
+                'username': f.following.username,
+            })
+
+    return Response({"chat_rooms": rooms_data, "following": following_users})
     
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
