@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Dimensions, Modal, FlatList, TextInput, Share, Switch } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Dimensions, Modal, FlatList, TextInput, Share, Switch, TouchableWithoutFeedback } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Video, ResizeMode } from 'expo-av';
+import { Snackbar } from 'react-native-paper';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons, Fontisto, Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -22,6 +23,8 @@ export default function ClipScreen() {
   const [commentsVisible, setCommentsVisible] = useState(false);
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState('');
+  const [snackbarVisible, setSnackbarVisible] = useState(false);
+  const [snackbarMessage, setSnackbarMessage] = useState('');
   const [progress, setProgress] = useState<number>(0);
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [followersList, setFollowersList] = useState<any[]>([]);
@@ -89,7 +92,7 @@ export default function ClipScreen() {
       }
 
       // comments
-      const commentsRes = await fetch(`${backendUrl}/features/getComments/?videoId=${vid}`, { method: 'GET', headers: { 'Authorization': `Bearer ${token}` } });
+      const commentsRes = await fetch(`${backendUrl}/comments/getComments/?videoId=${vid}`, { method: 'GET', headers: { 'Authorization': `Bearer ${token}` } });
       if (commentsRes.ok) {
         const cdata = await commentsRes.json();
         setComments(cdata.comments || []);
@@ -99,10 +102,16 @@ export default function ClipScreen() {
     }
   };
 
+  const goBackToProfile = () => {
+    // Prefer an explicit uploader/user id passed via params (when navigated from profile    
+      router.push(`/(tabs)/profile`);
+  
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.headerOverlay}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity onPress={goBackToProfile} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={28} color="#fff" />
         </TouchableOpacity>
       </View>
@@ -112,26 +121,40 @@ export default function ClipScreen() {
           <ActivityIndicator size="large" color="#fff" />
         ) : clipUrl || clip ? (
           <View style={{ width: window.width, height: window.height }}>
-            <Video
-              ref={videoRef}
-              source={{ uri: clipUrl || clip?.clipUrl }}
-              style={{ width: window.width, height: window.height }}
-              useNativeControls
-              resizeMode={ResizeMode.CONTAIN}
-              shouldPlay={isPlaying}
-              onPlaybackStatusUpdate={(status) => {
-                try {
-                  if (status && status.isLoaded) {
-                    // @ts-ignore
-                    setIsPlaying(!!status.isPlaying);
-                    const position = status.positionMillis || 0;
-                    const duration = status.durationMillis || 0;
-                    const p = duration > 0 ? position / duration : 0;
-                    setProgress(p);
-                  }
-                } catch (e) {}
-              }}
-            />
+            <TouchableWithoutFeedback onPress={async () => {
+              try {
+                // toggle play state
+                const newState = !isPlaying;
+                setIsPlaying(newState);
+                // also control the player directly for immediate response
+                if (videoRef?.current) {
+                  if (newState) await videoRef.current.playAsync().catch(() => {});
+                  else await videoRef.current.pauseAsync().catch(() => {});
+                }
+              } catch (e) {}
+            }}>
+              <Video
+                ref={videoRef}
+                source={{ uri: clipUrl || clip?.clipUrl }}
+                style={{ width: window.width, height: window.height }}
+                useNativeControls={false}
+                resizeMode={ResizeMode.CONTAIN}
+                shouldPlay={isPlaying}
+                isLooping
+                onPlaybackStatusUpdate={(status) => {
+                  try {
+                    if (status && status.isLoaded) {
+                      // @ts-ignore
+                      setIsPlaying(!!status.isPlaying);
+                      const position = status.positionMillis || 0;
+                      const duration = status.durationMillis || 0;
+                      const p = duration > 0 ? position / duration : 0;
+                      setProgress(p);
+                    }
+                  } catch (e) {}
+                }}
+              />
+            </TouchableWithoutFeedback>
             <View style={styles.progressBarBg}>
               <View style={[styles.progressBarFill, { width: `${Math.round((progress || 0) * 100)}%` }]} />
             </View>
@@ -197,16 +220,36 @@ export default function ClipScreen() {
               try {
                 const token = await AsyncStorage.getItem('accessToken');
                 const vid = clipId || clip?.id;
-                const res = await fetch(`${backendUrl}/features/addComment/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ video_id: vid, content: newComment }) });
+                const res = await fetch(`${backendUrl}/comments/addComment/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ video_id: vid, content: newComment }) });
+                const data = await res.json().catch(() => null);
                 if (res.ok) {
+                  if (data?.error) {
+                    // backend may classify and reject the comment
+                    const msg = data.error || 'Comment rejected';
+                    setSnackbarMessage(msg);
+                    setSnackbarVisible(true);
+                    return;
+                  }
                   setNewComment('');
                   await fetchLikesAndComments();
+                } else {
+                  const errMsg = data?.error || data?.message || 'Failed to post comment';
+                  setSnackbarMessage(errMsg);
+                  setSnackbarVisible(true);
                 }
-              } catch (e) { console.log('Post comment error', e); }
+              } catch (e) { console.log('Post comment error', e); setSnackbarMessage('Network error: failed to post comment'); setSnackbarVisible(true); }
             }} style={{ marginLeft: 8, justifyContent: 'center' }}>
               <Text style={{ color: '#4F8EF7' }}>Post</Text>
             </TouchableOpacity>
           </View>
+          <Snackbar
+            visible={snackbarVisible}
+            onDismiss={() => setSnackbarVisible(false)}
+            duration={3000}
+            style={{ backgroundColor: '#E91E63', position: 'absolute', bottom: 100, zIndex: 1000 }}
+          >
+            {snackbarMessage}
+          </Snackbar>
         </SafeAreaView>
       </Modal>
 

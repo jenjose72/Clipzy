@@ -238,6 +238,44 @@ const Chat = () => {
     console.log('followingUsers updated:', followingUsers);
   }, [followingUsers]);
 
+  // compute followings that don't have an existing chat room (to show in 'Start a chat')
+  const nonChatFollowings = React.useMemo(() => {
+    try {
+      const chatted = new Set<string>();
+      const isCurrent = (p: any) => {
+        if (!p) return false;
+        if (typeof p === 'object') {
+          const pid = String(p.user_id || p.id || '');
+          const pun = String(p.username || '');
+          return (currentUserId && (pid === String(currentUserId) || pun === String(currentUserId))) || (currentUsername && (pun === String(currentUsername)));
+        }
+        return (currentUserId && String(p) === String(currentUserId)) || (currentUsername && String(p) === String(currentUsername));
+      };
+      chatRooms.forEach((r: any) => {
+        const parts = r.participants || r.users || [];
+        if (Array.isArray(parts)) {
+          parts.forEach((p: any) => {
+            if (!p) return;
+            if (isCurrent(p)) return;
+            if (typeof p === 'object') {
+              const id = p.user_id || p.id || p.username;
+              if (id) chatted.add(String(id));
+            } else {
+              chatted.add(String(p));
+            }
+          });
+        }
+      });
+      return (followingUsers || []).filter((u: any) => {
+        const key = u?.user_id ? String(u.user_id) : (u?.username ? String(u.username) : null);
+        if (!key) return true; // show if no id to avoid dropping unknowns
+        return !chatted.has(key);
+      });
+    } catch (e) {
+      return followingUsers || [];
+    }
+  }, [followingUsers, chatRooms, currentUserId, currentUsername]);
+
   // helper: format timestamp (ms) to relative "time ago" string
   const formatTimeAgo = (ts?: number | null) => {
     if (!ts) return '';
@@ -608,24 +646,36 @@ const Chat = () => {
           <ActivityIndicator size="large" color="#666" />
         </View>
       ) : (
-        <FlatList
-          data={chatRooms.length > 0 ? chatRooms : followingUsers}
-          keyExtractor={(item, index) => {
-            if (item?.room_id) return `room_${item.room_id}`;
-            return `user_${item.user_id || index}`;
-          }}
-          renderItem={({ item }) => chatRooms.length > 0 ? renderRoom({ item }) : renderFollowing({ item })}
-          scrollEnabled={true}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Ionicons name="chatbubble-outline" size={56} color="#ddd" />
-              <Text style={styles.emptyText}>No conversations yet</Text>
-              <Text style={styles.emptySubtext}>Start a new conversation</Text>
-            </View>
-          }
-          contentContainerStyle={[styles.listContainer, chatRooms.length === 0 && followingUsers.length === 0 && { flexGrow: 1 }]}
-        />
+        <View style={{ flex: 1 }}>
+          <FlatList
+            data={chatRooms}
+            keyExtractor={(item, index) => item?.room_id ? `room_${item.room_id}` : `room_${index}`}
+            renderItem={({ item }) => renderRoom({ item })}
+            scrollEnabled={true}
+            ItemSeparatorComponent={() => <View style={styles.separator} />}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Ionicons name="chatbubble-outline" size={56} color="#ddd" />
+                <Text style={styles.emptyText}>No conversations yet</Text>
+                <Text style={styles.emptySubtext}>Start a new conversation</Text>
+              </View>
+            }
+            ListFooterComponent={nonChatFollowings && nonChatFollowings.length > 0 ? (
+              <View style={styles.followingStrip}>
+                <Text style={styles.followingTitle}>Start a chat</Text>
+                <FlatList
+                  data={nonChatFollowings}
+                  horizontal
+                  keyExtractor={(it) => String(it.user_id || it.username)}
+                  renderItem={({ item }) => renderFollowing({ item })}
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={{ paddingHorizontal: 12 }}
+                />
+              </View>
+            ) : null}
+            contentContainerStyle={[styles.listContainer, chatRooms.length === 0 && followingUsers.length === 0 && { flexGrow: 1 }]}
+          />
+        </View>
       )}
     </SafeAreaView>
   );
@@ -650,6 +700,19 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontWeight: '800',
     color: '#1a1a1a',
+  },
+  followingStrip: {
+    paddingVertical: 10,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  followingTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#333',
+    paddingHorizontal: 12,
+    marginBottom: 8,
   },
   addButton: {
     width: 44,

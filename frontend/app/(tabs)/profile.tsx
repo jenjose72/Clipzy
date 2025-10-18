@@ -20,98 +20,113 @@ const Profile = () => {
   const [editingBio, setEditingBio] = useState(false);
   const [bioDraft, setBioDraft] = useState('');
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
+  const [refreshing, setRefreshing] = useState(false);
+
+  // fetch profile data
+  const fetchProfile = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      const res = await fetch(`${backendUrl}/accounts/profile/`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const data = await res.json();
+      console.log(data);
+      if (res.ok) {
+        // normalize backend response shapes: sometimes the profile may be nested or missing name
+        const profileData = data?.profile || data || {};
+        const normalized = {
+          ...profileData,
+          name: profileData.name || profileData.username || '',
+          username: profileData.username || profileData.name || '',
+        };
+        setProfile(normalized);
+        setBioDraft(normalized?.bio || '');
+      } else {
+        setError(data.error || 'Failed to fetch profile');
+      }
+    } catch (e) {
+      setError('Network error');
+    }
+    setLoading(false);
+  };
+
+  const generateThumbnails = async (clips: Array<any>) => {
+    for (const clip of clips) {
+      try {
+        if (!clip?.clipUrl || thumbnails[clip.id]) continue;
+        // try native thumbnail generation first
+        let uri: string | null = null;
+        try {
+          const result = await VideoThumbnails.getThumbnailAsync(clip.clipUrl, { time: 1000 });
+          uri = result?.uri || null;
+        } catch (err) {
+          console.log('VideoThumbnails failed for', clip.id, err);
+          uri = null;
+        }
+
+        // fallback: if we have a Cloudinary video URL, derive a JPG frame URL
+        if (!uri && clip.clipUrl && typeof clip.clipUrl === 'string' && clip.clipUrl.includes('res.cloudinary.com')) {
+          // Replace video extension with .jpg (works for Cloudinary-hosted videos)
+          uri = clip.clipUrl.replace(/\.(mp4|mov|webm)(\?.*)?$/i, '.jpg');
+        }
+
+        // final fallback: use the clipUrl itself (may render a poster frame depending on server)
+        if (!uri) uri = clip.clipUrl;
+
+        setThumbnails(prev => ({ ...prev, [clip.id]: uri }));
+      } catch (err) {
+        console.log('Thumbnail generation failed for', clip.id, err);
+        // fallback to clipUrl
+        setThumbnails(prev => ({ ...prev, [clip.id]: clip.clipUrl }));
+      }
+    }
+  };
+
+  // fetch the user's uploaded clips
+  const fetchMyClips = async () => {
+    try {
+      const token = await AsyncStorage.getItem('accessToken');
+      const res = await fetch(`${backendUrl}/features/myClips/`, {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const clips = data.clips || [];
+        setMyClips(clips);
+        // generate thumbnails for clips (skip on web)
+        if (!Constants.platform?.web) {
+          generateThumbnails(clips);
+        }
+      } else {
+        console.log('Failed to fetch my clips', data);
+      }
+    } catch (e) {
+      console.log('Error fetching my clips', e);
+    }
+  };
 
   useEffect(() => {
-    const fetchProfile = async () => {
-      setLoading(true);
-      setError('');
-      try {
-        const token = await AsyncStorage.getItem('accessToken');
-        const res = await fetch(`${backendUrl}/accounts/profile/`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-        const data = await res.json();
-        console.log(data);
-        if (res.ok) {
-          // normalize backend response shapes: sometimes the profile may be nested or missing name
-          const profileData = data?.profile || data || {};
-          const normalized = {
-            ...profileData,
-            name: profileData.name || profileData.username || '',
-            username: profileData.username || profileData.name || '',
-          };
-          setProfile(normalized);
-          setBioDraft(normalized?.bio || '');
-        } else {
-          setError(data.error || 'Failed to fetch profile');
-        }
-      } catch (e) {
-        setError('Network error');
-      }
-      setLoading(false);
-    };
     fetchProfile();
-    // fetch user's uploaded clips
-    const fetchMyClips = async () => {
-      try {
-        const token = await AsyncStorage.getItem('accessToken');
-        const res = await fetch(`${backendUrl}/features/myClips/`, {
-          method: 'GET',
-          headers: { 'Authorization': `Bearer ${token}` },
-        });
-        const data = await res.json();
-        if (res.ok) {
-          const clips = data.clips || [];
-          setMyClips(clips);
-          // generate thumbnails for clips (skip on web)
-          if (!Constants.platform?.web) {
-            generateThumbnails(clips);
-          }
-        } else {
-          console.log('Failed to fetch my clips', data);
-        }
-      } catch (e) {
-        console.log('Error fetching my clips', e);
-      }
-    };
-    
-    const generateThumbnails = async (clips: Array<any>) => {
-      for (const clip of clips) {
-        try {
-          if (!clip?.clipUrl || thumbnails[clip.id]) continue;
-          // try native thumbnail generation first
-          let uri: string | null = null;
-          try {
-            const result = await VideoThumbnails.getThumbnailAsync(clip.clipUrl, { time: 1000 });
-            uri = result?.uri || null;
-          } catch (err) {
-            console.log('VideoThumbnails failed for', clip.id, err);
-            uri = null;
-          }
-
-          // fallback: if we have a Cloudinary video URL, derive a JPG frame URL
-          if (!uri && clip.clipUrl && typeof clip.clipUrl === 'string' && clip.clipUrl.includes('res.cloudinary.com')) {
-            // Replace video extension with .jpg (works for Cloudinary-hosted videos)
-            uri = clip.clipUrl.replace(/\.(mp4|mov|webm)(\?.*)?$/i, '.jpg');
-          }
-
-          // final fallback: use the clipUrl itself (may render a poster frame depending on server)
-          if (!uri) uri = clip.clipUrl;
-
-          setThumbnails(prev => ({ ...prev, [clip.id]: uri }));
-        } catch (err) {
-          console.log('Thumbnail generation failed for', clip.id, err);
-          // fallback to clipUrl
-          setThumbnails(prev => ({ ...prev, [clip.id]: clip.clipUrl }));
-        }
-      }
-    };
     fetchMyClips();
   }, []);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await fetchProfile();
+      await fetchMyClips();
+    } catch (e) {
+      console.log('Refresh failed', e);
+    }
+    setRefreshing(false);
+  };
 
   const pickAndUpload = async () => {
     if (Constants.platform?.web) {
@@ -244,7 +259,7 @@ const Profile = () => {
     }
 
     return (
-      <TouchableOpacity onPress={() => router.push({ pathname: '/(tabs)/clip/[clipId]', params: { clipId: String(item.clip.id), clipUrl: item.clip.clipUrl } })} style={[styles.gridItem, { width: itemSize, height: itemSize }]}> 
+      <TouchableOpacity onPress={() => router.push({ pathname: '/(tabs)/clip/[clipId]', params: { clipId: String(item.clip.id), clipUrl: item.clip.clipUrl, userId: String(profile?.id || profile?.user_id || '') } })} style={[styles.gridItem, { width: itemSize, height: itemSize }]}> 
         {item.type === 'video' && item.clip ? (
           // prefer generated thumbnail if available
           <Image source={{ uri: thumbnails[item.clip.id] || item.clip.clipUrl }} style={{ width: '100%', height: '100%' }} />
@@ -316,7 +331,7 @@ const Profile = () => {
               </View>
             ) : (
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <Text style={{ color: '#111', flex: 1 }}>{profile?.bio || 'the one who chases a million hoes ends up with no "O\'s"'}</Text>
+                <Text style={{ color: '#111', flex: 1 }}>{profile?.bio || 'You can set your bio here'}</Text>
                 <TouchableOpacity onPress={() => setEditingBio(true)} style={{ marginLeft: 8 }}>
                   <Text style={{ color: '#0066cc' }}>Edit</Text>
                 </TouchableOpacity>
@@ -346,6 +361,8 @@ const Profile = () => {
         contentContainerStyle={{ padding: gridPadding }}
         columnWrapperStyle={{ justifyContent: 'space-between', marginBottom: 6 }}
         showsVerticalScrollIndicator={false}
+        refreshing={refreshing}
+        onRefresh={handleRefresh}
       />
     </SafeAreaView>
   );

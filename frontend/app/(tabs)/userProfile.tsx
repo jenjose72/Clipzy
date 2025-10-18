@@ -130,7 +130,7 @@ const UserProfile = () => {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.leftIcon}>
+        <TouchableOpacity onPress={() => router.push('/search')} style={styles.leftIcon}>
           <MaterialIcons name="arrow-back" size={24} color="#111" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>{profile?.username || 'Profile'}</Text>

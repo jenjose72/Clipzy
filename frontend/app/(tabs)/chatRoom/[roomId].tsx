@@ -199,7 +199,7 @@ const ChatRoomPage = () => {
 			<SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
 				<View style={styles.header}>
 					<View style={{ flexDirection: 'row', alignItems: 'center' }}>
-						<TouchableOpacity style={{ padding: 8 }} onPress={() => router.back()}>
+						<TouchableOpacity style={{ padding: 8 }} onPress={() => router.push('/chat')}>
 							<MaterialIcons name="arrow-back-ios" size={20} color="#111" />
 						</TouchableOpacity>
 						<View style={{ width: 8 }} />
@@ -262,12 +262,20 @@ const ChatRoomPage = () => {
 										{item.text ? (
 											<Text style={[styles.bubbleText, isMe ? { color: '#fff' } : { color: '#111' }]}>{item.text}</Text>
 										) : null}
-										{item.video ? (
-											<TouchableOpacity onPress={() => router.push(`/(tabs)/clip/${item.video}`)} style={styles.videoPreviewWrap}>
-												<View style={styles.videoDot} />
-												<Text style={styles.videoLabel}>View clip</Text>
-											</TouchableOpacity>
-										) : null}
+												{item.video ? (
+													<TouchableOpacity onPress={() => {
+														// try to provide uploader id so the clip screen can navigate back to profile
+														const senderId = item.sender && item.sender !== 'me' ? String(item.sender) : (otherParticipant?.user_id || otherParticipant?.id || null);
+														if (senderId) {
+															router.push({ pathname: '/(tabs)/clip/[clipId]', params: { clipId: String(item.video), userId: String(senderId) } });
+														} else {
+															router.push(`/(tabs)/clip/${item.video}`);
+														}
+													}} style={styles.videoPreviewWrap}>
+														<View style={styles.videoDot} />
+														<Text style={styles.videoLabel}>View clip</Text>
+													</TouchableOpacity>
+													) : null}
 									</View>
 								</View>
 								{isMe && <View style={{ width: 36 }} />}

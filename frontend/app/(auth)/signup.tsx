@@ -92,6 +92,20 @@ export default function Signup() {
     </Pressable>
   );
 
+  // enhanced primary button: supports disabled and loading states
+  const PrimaryButtonEx = ({ onPress, title, disabled, loading }: { onPress: () => void; title: string; disabled?: boolean; loading?: boolean }) => (
+    <Pressable onPress={() => { if (disabled || loading) return; onPress(); }} disabled={disabled || loading} style={{ backgroundColor: disabled || loading ? '#999' : 'black', padding: 14, borderRadius: 12, alignItems: 'center', marginTop: 18, opacity: disabled || loading ? 0.9 : 1 }}>
+      {loading ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <ActivityIndicator size="small" color="#fff" />
+          <Text style={{ color: 'white', fontWeight: '600' }}>{title}</Text>
+        </View>
+      ) : (
+        <Text style={{ color: 'white', fontWeight: '600' }}>{title}</Text>
+      )}
+    </Pressable>
+  );
+
   
 
   return (
@@ -118,11 +132,7 @@ export default function Signup() {
             style={{ borderWidth: 1, borderColor: '#eee', padding: 14, borderRadius: 12, marginTop: 18, backgroundColor: '#fff' }}
           />
 
-          {loading ? (
-            <ActivityIndicator style={{ marginTop: 16 }} />
-          ) : (
-            <PrimaryButton title="Continue" onPress={requestOtp} />
-          )}
+          <PrimaryButtonEx title="Continue" onPress={requestOtp} loading={loading} disabled={loading} />
 
           <Text style={{ textAlign: 'center', color: '#666', marginTop: 12 }}>Already have an account? <Text style={{ fontWeight: '700' }} onPress={() => router.replace('/(auth)/login')}>Login Now!</Text></Text>
 
@@ -153,8 +163,10 @@ export default function Signup() {
           <TextInput placeholder="confirm password" secureTextEntry value={confirmPassword} onChangeText={setConfirmPassword} style={{ borderWidth: 1, borderColor: '#eee', padding: 12, borderRadius: 10, marginTop: 12, backgroundColor: '#fff' }} />
 
           <View style={{ marginTop: 18 }}>
-            <PrimaryButton
-              title="Continue"
+            <PrimaryButtonEx
+              title="Sign up"
+              loading={loading}
+              disabled={loading}
               onPress={() => {
                 if (!name || !dob || !password || !username || !confirmPassword) return setError('Please fill all fields');
                 if (password !== confirmPassword) return setError('Passwords do not match');

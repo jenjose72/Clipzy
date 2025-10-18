@@ -32,6 +32,8 @@ export default function HomeScreen() {
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
   const [comments, setComments] = useState<any[]>([]);
   const [newComment, setNewComment] = useState('');
+  const [videoLoadErrors, setVideoLoadErrors] = useState<Record<number, boolean>>({});
+  const videoRetryCounts = useRef<Record<number, number>>({});
   const [refreshing, setRefreshing] = useState(false);
   const [snackbarVisible, setSnackbarVisible] = useState(false);
   const [snackbarMessage, setSnackbarMessage] = useState('');
@@ -796,8 +798,58 @@ export default function HomeScreen() {
             isLooping
             useNativeControls={false}
             volume={1.0}
+            onError={(e) => {
+              console.error('Video load error at index', index, e);
+              // increment retry count and attempt reload
+              const prev = videoRetryCounts.current[index] || 0;
+              const next = prev + 1;
+              videoRetryCounts.current[index] = next;
+              if (next <= 2) {
+                // try to reload/unload then load again
+                (async () => {
+                  try {
+                    const ref = videoRefs.current[index];
+                    if (ref && ref.unloadAsync) {
+                      await ref.unloadAsync().catch(() => {});
+                    }
+                    if (ref && ref.loadAsync) {
+                      await ref.loadAsync({ uri: item.clipUrl } as any).catch(() => {});
+                    }
+                    if (ref && isPlayingArr[index] && ref.playAsync) {
+                      await ref.playAsync().catch(() => {});
+                    }
+                    // clear any previous error
+                    setVideoLoadErrors(prev => ({ ...prev, [index]: false }));
+                  } catch (err) {
+                    console.error('Retry load failed for index', index, err);
+                    // if retry fails, mark error (will be set by next onError)
+                  }
+                })();
+              } else {
+                setVideoLoadErrors(prev => ({ ...prev, [index]: true }));
+              }
+            }}
           />
         </TouchableWithoutFeedback>
+        {videoLoadErrors[index] ? (
+          // show a thumbnail + retry button when video failed repeatedly
+          <View style={{ position: 'absolute', width: width, height: height, justifyContent: 'center', alignItems: 'center' }}>
+            {/* show caption overlay behind the retry UI */}
+            <TouchableOpacity onPress={async () => {
+              // manual retry: reset counter and try reload
+              videoRetryCounts.current[index] = 0;
+              setVideoLoadErrors(prev => ({ ...prev, [index]: false }));
+              const ref = videoRefs.current[index];
+              try {
+                if (ref && ref.unloadAsync) await ref.unloadAsync().catch(() => {});
+                if (ref && ref.loadAsync) await ref.loadAsync({ uri: item.clipUrl } as any).catch(() => {});
+                if (ref && isPlayingArr[index] && ref.playAsync) await ref.playAsync().catch(() => {});
+              } catch (e) { console.error('Manual retry failed', e); setVideoLoadErrors(prev => ({ ...prev, [index]: true })); }
+            }} style={{ backgroundColor: 'rgba(0,0,0,0.6)', padding: 12, borderRadius: 8 }}>
+              <Text style={{ color: 'white', fontWeight: '700' }}>Retry video</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
         <View style={styles.progressBarBg}>
           <Animated.View style={[styles.progressBarFill, { width: animatedWidth }]} />
         </View>
@@ -860,6 +912,9 @@ export default function HomeScreen() {
         snapToAlignment="start"
         snapToInterval={height} // Snap to full screen height
         decelerationRate="fast" // Faster deceleration for snappier feel
+        windowSize={3}
+        initialNumToRender={1}
+        maxToRenderPerBatch={1}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
