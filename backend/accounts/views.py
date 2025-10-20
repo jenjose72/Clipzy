@@ -87,16 +87,19 @@ def getProfileInfo(request):
 def updateProfilePic(request):
     """Accepts JSON { "profile_pic": "<cloudinary_url>" } and saves to the UserProfile.
     Uses DRF authentication so `request.user` is populated the same way as other views.
+    An empty string can be sent to remove the profile picture.
     """
     try:
         user = request.user
         userProfile = UserProfile.objects.get(user=user)
-        pic_url = request.data.get('profile_pic')
-        if not pic_url:
-            return Response({"error": "profile_pic is required"}, status=400)
+        # Allow profile_pic to be None or empty string (to remove picture)
+        if 'profile_pic' not in request.data:
+            return Response({"error": "profile_pic field is required in request"}, status=400)
+        pic_url = request.data.get('profile_pic', '')
         userProfile.profile_pic = pic_url
         userProfile.save()
-        return Response({"message": "Profile picture updated", "profile_pic": pic_url}, status=200)
+        message = "Profile picture removed" if not pic_url else "Profile picture updated"
+        return Response({"message": message, "profile_pic": pic_url}, status=200)
     except UserProfile.DoesNotExist:
         return Response({"error": "User profile does not exist."}, status=404)
     except Exception as e:
@@ -176,3 +179,34 @@ def getOtherUserProfileInfo(request):
         return Response({"error": "User does not exist."}, status=404)
     except UserProfile.DoesNotExist:
         return Response({"error": "User profile does not exist."}, status=404)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def changePassword(request):
+    """Change user password.
+    Accepts JSON { "current_password": "...", "new_password": "..." }
+    """
+    try:
+        user = request.user
+        current_password = request.data.get('current_password')
+        new_password = request.data.get('new_password')
+        
+        if not current_password or not new_password:
+            return Response({"error": "Both current_password and new_password are required."}, status=400)
+        
+        # Verify current password
+        if not user.check_password(current_password):
+            return Response({"error": "Current password is incorrect."}, status=400)
+        
+        # Validate new password length
+        if len(new_password) < 6:
+            return Response({"error": "New password must be at least 6 characters long."}, status=400)
+        
+        # Set new password
+        user.set_password(new_password)
+        user.save()
+        
+        return Response({"message": "Password changed successfully."}, status=200)
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)

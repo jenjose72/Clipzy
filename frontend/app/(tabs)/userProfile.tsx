@@ -145,7 +145,7 @@ const UserProfile = () => {
         <View style={{ paddingHorizontal: 16 }}>
           <View style={styles.profileRow}>
             <View style={styles.leftCol}>
-              {profile.profile_pic ? (
+              {profile.profile_pic && profile.profile_pic.trim() !== '' ? (
                 <Image source={{ uri: profile.profile_pic }} style={styles.avatarCircle} />
               ) : (
                 <View style={styles.avatarCircle}>

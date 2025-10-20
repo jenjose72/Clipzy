@@ -1,12 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Button, TouchableOpacity, ActivityIndicator, StyleSheet, Image, FlatList, Dimensions, TextInput } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet, Image, FlatList, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../components/AuthContext';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { backendUrl } from '@/constants/Urls';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import * as ImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import Constants from 'expo-constants';
 
@@ -17,8 +16,6 @@ const Profile = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [myClips, setMyClips] = useState<Array<any>>([]);
-  const [editingBio, setEditingBio] = useState(false);
-  const [bioDraft, setBioDraft] = useState('');
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
   const [refreshing, setRefreshing] = useState(false);
 
@@ -46,7 +43,6 @@ const Profile = () => {
           username: profileData.username || profileData.name || '',
         };
         setProfile(normalized);
-        setBioDraft(normalized?.bio || '');
       } else {
         setError(data.error || 'Failed to fetch profile');
       }
@@ -128,116 +124,9 @@ const Profile = () => {
     setRefreshing(false);
   };
 
-  const pickAndUpload = async () => {
-    if (Constants.platform?.web) {
-      alert('Profile upload not supported on web in this demo');
-      return;
-    }
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      alert('Permission required to pick an image');
-      return;
-    }
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.8 });
-  // expo-image-picker v14+ uses `canceled` and `assets`
-  if ((res as any).canceled) return;
-
-  const uri = (res as any).assets ? (res as any).assets[0].uri : (res as any).uri;
-    const form = new FormData();
-    const fileName = uri.split('/').pop() || 'avatar.jpg';
-    const fileType = fileName.split('.').pop() || 'jpg';
-    // @ts-ignore
-    form.append('file', { uri, name: fileName, type: `image/${fileType}` });
-  // Use the same unsigned preset the video uploader uses
-  form.append('upload_preset', 'Clipzy');
-    try {
-      setLoading(true);
-      console.log('Uploading avatar to Cloudinary, form keys:', Array.from((form as any)._parts || []));
-      const cloudRes = await fetch('https://api.cloudinary.com/v1_1/dp1tqdgwl/image/upload', {
-        method: 'POST',
-        body: form as any,
-      });
-      let cloudData: any = null;
-      try {
-        cloudData = await cloudRes.json();
-      } catch (err) {
-        const text = await cloudRes.text();
-        console.log('Cloudinary returned non-JSON response:', text);
-        alert('Upload failed: ' + text);
-        setLoading(false);
-        return;
-      }
-      console.log('Cloudinary status:', cloudRes.status, cloudRes.statusText, 'response:', cloudData);
-      if (cloudData?.secure_url) {
-        // POST to backend to save
-        const token = await AsyncStorage.getItem('accessToken');
-        const saveRes = await fetch(`${backendUrl}/accounts/update_profile_pic/`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-          },
-          body: JSON.stringify({ profile_pic: cloudData.secure_url }),
-        });
-        let saveData: any = null;
-        try {
-          saveData = await saveRes.json();
-        } catch (err) {
-          // backend might return HTML (error page) or plain text; capture that
-          try {
-            saveData = await saveRes.text();
-          } catch (e) {
-            saveData = `Non-JSON response, status ${saveRes.status}`;
-          }
-        }
-        if (saveRes.ok) {
-          setProfile((prev: any) => ({ ...prev, profile_pic: cloudData.secure_url }));
-        } else {
-          console.log('Save profile pic failed:', saveRes.status, saveData);
-          // show useful message
-          alert(typeof saveData === 'string' ? saveData : (saveData?.error || 'Failed to save profile pic'));
-        }
-      } else {
-        console.log('Cloudinary response (no secure_url):', cloudData);
-        alert('Upload failed: ' + JSON.stringify(cloudData));
-      }
-    } catch (e) {
-      console.error(e);
-      alert('Upload error');
-    }
-    setLoading(false);
-  };
-
   const handleLogout = () => {
     logout();
     router.replace('/(auth)/login');
-  };
-
-  const saveBio = async () => {
-    try {
-      setLoading(true);
-      const token = await AsyncStorage.getItem('accessToken');
-      const res = await fetch(`${backendUrl}/accounts/update_bio/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ bio: bioDraft }),
-      });
-      const data = await res.json().catch(() => null);
-      if (res.ok) {
-        setProfile((p: any) => ({ ...p, bio: bioDraft }));
-        setEditingBio(false);
-      } else {
-        console.log('Failed to save bio', data);
-        alert('Failed to save bio');
-      }
-    } catch (e) {
-      console.log('Error saving bio', e);
-      alert('Network error');
-    }
-    setLoading(false);
   };
 
   const screenWidth = Dimensions.get('window').width;
@@ -290,60 +179,45 @@ const Profile = () => {
       <View style={styles.profileRow}>
         <View style={styles.leftCol}>
           <View style={styles.avatarWrap}>
-            {profile?.profile_pic ? (
+            {profile?.profile_pic && profile.profile_pic.trim() !== '' ? (
               <Image source={{ uri: profile.profile_pic }} style={styles.avatarCircle} />
             ) : (
               <Image source={require('@/assets/images/avatar.png')} style={styles.avatarCircle} />
             )}
-            <TouchableOpacity style={[styles.editBtn, { marginTop: 12 }]} onPress={pickAndUpload}>
-              <Text style={styles.editBtnText}>{loading ? 'Fetching...' : 'Change Avatar'}</Text>
-            </TouchableOpacity>
           </View>
         </View>
 
         <View style={styles.rightCol}>
-          {/* Name and username separated from bio */}
+          {/* Name and username */}
           <View style={{ marginBottom: 6 }}>
             <Text style={{ color: '#111', fontWeight: '700', fontSize: 18 }}>{profile?.name || profile?.username || ''}</Text>
             <View style={{ marginTop: 4 }}>
               <Text style={{ color: '#666' }}>@{profile?.username || ''}</Text>
             </View>
-            {/* email intentionally hidden in profile view */}
           </View>
 
+          {/* Bio Display */}
           <View style={styles.bioBox}>
-            {editingBio ? (
-              <View>
-                <TextInput
-                  value={bioDraft}
-                  onChangeText={setBioDraft}
-                  multiline
-                  style={{ minHeight: 60, padding: 8, borderColor: '#ddd', borderWidth: 1, borderRadius: 6 }}
-                />
-                <View style={{ flexDirection: 'row', marginTop: 8 }}>
-                  <TouchableOpacity onPress={saveBio} style={{ marginRight: 12 }}>
-                    <Text style={{ color: '#0066cc' }}>Save</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => { setEditingBio(false); setBioDraft(profile?.bio || ''); }}>
-                    <Text style={{ color: '#666' }}>Cancel</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : (
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <Text style={{ color: '#111', flex: 1 }}>{profile?.bio || 'You can set your bio here'}</Text>
-                <TouchableOpacity onPress={() => setEditingBio(true)} style={{ marginLeft: 8 }}>
-                  <Text style={{ color: '#0066cc' }}>Edit</Text>
-                </TouchableOpacity>
-              </View>
-            )}
+            <Text style={{ color: '#111' }}>{profile?.bio || 'No bio yet'}</Text>
           </View>
+        </View>
+      </View>
 
-          <View style={styles.followRow}>
-            <View style={styles.followItem}><Text style={styles.followNum}>{postsCount}</Text><Text style={styles.followLabel}>posts</Text></View>
-            <View style={styles.followItem}><Text style={styles.followNum}>{profile?.followers ?? 10}</Text><Text style={styles.followLabel}>followers</Text></View>
-            <View style={styles.followItem}><Text style={styles.followNum}>{profile?.following ?? 6}</Text><Text style={styles.followLabel}>following</Text></View>
-          </View>
+      {/* Stats - Full Width */}
+      <View style={styles.followRow}>
+        <View style={styles.followItem}>
+          <Text style={styles.followNum}>{postsCount}</Text>
+          <Text style={styles.followLabel}>posts</Text>
+        </View>
+        <View style={styles.statDivider} />
+        <View style={styles.followItem}>
+          <Text style={styles.followNum}>{profile?.followers ?? 10}</Text>
+          <Text style={styles.followLabel}>followers</Text>
+        </View>
+        <View style={styles.statDivider} />
+        <View style={styles.followItem}>
+          <Text style={styles.followNum}>{profile?.following ?? 6}</Text>
+          <Text style={styles.followLabel}>following</Text>
         </View>
       </View>
 
@@ -358,8 +232,8 @@ const Profile = () => {
         keyExtractor={(it) => it.id}
         renderItem={renderItem}
         numColumns={colCount}
-        contentContainerStyle={{ padding: gridPadding }}
-        columnWrapperStyle={{ justifyContent: 'space-between', marginBottom: 6 }}
+        contentContainerStyle={{ padding: gridPadding, backgroundColor: '#FFFFFF' }}
+        columnWrapperStyle={{ justifyContent: 'space-between', marginBottom: 2 }}
         showsVerticalScrollIndicator={false}
         refreshing={refreshing}
         onRefresh={handleRefresh}
@@ -371,7 +245,7 @@ const Profile = () => {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#F5F6FA',
+    backgroundColor: '#FFFFFF',
   },
   // header
   header: {
@@ -379,9 +253,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    borderBottomWidth: 0.5,
-    borderBottomColor: '#eee',
+    paddingHorizontal: 16,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5E5',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
   },
   leftIcon: {
     width: 40,
@@ -396,7 +276,9 @@ const styles = StyleSheet.create({
   profileRow: {
     flexDirection: 'row',
     paddingHorizontal: 16,
-    paddingTop: 18,
+    paddingTop: 20,
+    paddingBottom: 16,
+    backgroundColor: '#FFFFFF',
   },
   leftCol: {
     width: 120,
@@ -416,8 +298,13 @@ const styles = StyleSheet.create({
     height: 120,
     borderRadius: 60,
     backgroundColor: '#2d7bf6',
-    borderWidth: 2,
-    borderColor: '#000',
+    borderWidth: 3,
+    borderColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
   },
   editBtn: {
     marginTop: 8,
@@ -432,40 +319,57 @@ const styles = StyleSheet.create({
   },
 
   bioBox: {
-    backgroundColor: '#dbdadaff',
-    padding: 10,
-    borderRadius: 8,
+    backgroundColor: '#F8F9FA',
+    padding: 12,
+    marginTop: 12,
+    borderRadius: 10,
     minHeight: 48,
     justifyContent: 'center',
+    borderLeftWidth: 3,
+    borderLeftColor: '#000000ff',
   },
   followRow: {
     flexDirection: 'row',
-    marginTop: 12,
     alignItems: 'center',
+    backgroundColor: '#F8F9FA',
+    padding: 16,
+    borderRadius: 10,
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
+    justifyContent: 'space-evenly',
   },
   followItem: {
-    marginRight: 18,
     alignItems: 'center',
+    minWidth: 80,
+  },
+  statDivider: {
+    width: 1,
+    height: 40,
+    backgroundColor: '#D0D0D0',
   },
   followNum: {
     fontWeight: '800',
-    fontSize: 20,
+    fontSize: 22,
+    color: '#111',
   },
   followLabel: {
-    fontSize: 15,
-    color: '#777',
+    fontSize: 13,
+    color: '#666',
+    marginTop: 2,
   },
 
   tabRow: {
     flexDirection: 'row',
-    marginTop: 18,
+    marginTop: 8,
+    backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
-    borderTopColor: '#eee',
-    borderBottomColor: '#eee',
-    paddingVertical: 10,
+    borderTopColor: '#E5E5E5',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5E5',
+    paddingVertical: 12,
     paddingHorizontal: 16,
     justifyContent: 'flex-start',
-    
   },
   tabButton: {
     padding: 8,
@@ -477,20 +381,25 @@ const styles = StyleSheet.create({
   },
 
   gridItem: {
-    marginBottom: 6,
-    borderRadius: 6,
+    marginBottom: 2,
+    borderRadius: 8,
     overflow: 'hidden',
-    backgroundColor: '#fff',
+    backgroundColor: '#F5F5F5',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 2,
   },
   addCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     borderWidth: 2,
-    borderColor: '#ccc',
+    borderColor: '#4F8EF7',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: '#FFFFFF',
   },
   thumbPlaceholder: {
     flex: 1,
@@ -499,14 +408,19 @@ const styles = StyleSheet.create({
   },
   playOverlay: {
     position: 'absolute',
-    right: 6,
-    bottom: 6,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    width: 34,
-    height: 34,
-    borderRadius: 18,
+    right: 8,
+    bottom: 8,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 3,
   },
 
   tabTitle: {

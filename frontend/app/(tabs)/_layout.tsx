@@ -87,6 +87,24 @@ export default function TabLayout() {
         options={{ href: null }}
       />
       <Tabs.Screen
+        name="settings"
+        options={{ href: null }}
+      /><Tabs.Screen
+        name="editProfile"
+        options={{ href: null }}
+      />
+      <Tabs.Screen
+        name="blockedUsers"
+        options={{ href: null }}
+      />
+      <Tabs.Screen
+        name="privacyPolicy"
+        options={{ href: null }}
+      /><Tabs.Screen
+        name="termsOfService"
+        options={{ href: null }}
+      />
+      <Tabs.Screen
         name="clip/[clipId]"
         options={{ tabBarStyle: {
             backgroundColor: '#000',

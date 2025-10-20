@@ -5,12 +5,13 @@ import { useAuth } from '../../components/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { backendUrl } from '@/constants/Urls';
 import ClipzyLogo from '@/components/icons/clipzyLogo';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function Login() {
   const [username, setUsername] = useState('test');
-  const [password, setPassword] = useState('password@123');
+  const [password, setPassword] = useState('Password');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const router = useRouter();
   const { login } = useAuth();
@@ -61,8 +62,44 @@ export default function Login() {
         </View>
 
         <View style={styles.form}>
-          <TextInput placeholder="Username" value={username} onChangeText={setUsername} style={styles.input} />
-          <TextInput placeholder="Password" value={password} onChangeText={setPassword} secureTextEntry style={styles.input} />
+          {/* Username Input */}
+          <View style={styles.inputContainer}>
+            <Ionicons name="person-outline" size={20} color="#666" style={styles.inputIcon} />
+            <TextInput 
+              placeholder="Username" 
+              value={username} 
+              onChangeText={setUsername} 
+              style={styles.input}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholderTextColor="#999"
+            />
+          </View>
+
+          {/* Password Input */}
+          <View style={styles.inputContainer}>
+            <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.inputIcon} />
+            <TextInput 
+              placeholder="Password" 
+              value={password} 
+              onChangeText={setPassword} 
+              secureTextEntry={!showPassword}
+              style={styles.input}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholderTextColor="#999"
+            />
+            <TouchableOpacity 
+              onPress={() => setShowPassword(!showPassword)}
+              style={styles.eyeIcon}
+            >
+              <Ionicons 
+                name={showPassword ? "eye-outline" : "eye-off-outline"} 
+                size={22} 
+                color="#666" 
+              />
+            </TouchableOpacity>
+          </View>
 
           <TouchableOpacity
             style={[styles.button, loading ? styles.buttonDisabled : null]}
@@ -93,8 +130,30 @@ const styles = StyleSheet.create({
   title: { fontSize: 28, fontWeight: '700', marginTop: 8, letterSpacing: 2 },
   subtitle: { marginTop: 20, color: '#000', fontWeight: '600',fontSize:20 },
   form: { paddingBottom: 40, marginTop: 60 },
-  input: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#eee', paddingHorizontal: 14, paddingVertical: 12, borderRadius: 10, marginBottom: 12 },
-  button: { backgroundColor: '#000', paddingVertical: 14, borderRadius: 12, alignItems: 'center', marginTop: 8 },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F5F6FA',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    marginBottom: 16,
+    paddingHorizontal: 14,
+  },
+  inputIcon: {
+    marginRight: 10,
+  },
+  input: { 
+    flex: 1,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: '#333',
+  },
+  eyeIcon: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  button: { backgroundColor: '#000', paddingVertical: 16, borderRadius: 12, alignItems: 'center', marginTop: 8 },
   buttonText: { color: '#fff', fontWeight: '600', fontSize: 16 },
   buttonDisabled: { opacity: 0.7 },
   footerText: { textAlign: 'center', marginTop: 24, color: '#666', fontSize: 13 },

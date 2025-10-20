@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { View, Text, TextInput, Pressable, ActivityIndicator, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, TextInput, Pressable, ActivityIndicator, TouchableOpacity, Platform, StyleSheet } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
+import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../components/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -19,6 +20,8 @@ export default function Signup() {
   const [username, setUsername] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [name, setName] = useState('');
   const [dob, setDob] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -136,13 +139,19 @@ export default function Signup() {
           <Text style={{ fontSize: 18, fontWeight: '700', marginTop: 22, textAlign: 'center' }}>Create an account</Text>
           <Text style={{ color: '#666', textAlign: 'center', marginTop: 8 }}>Enter your email to sign up for this app</Text>
 
-          <TextInput
-            placeholder="email@domain.com"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            style={{ borderWidth: 1, borderColor: '#eee', padding: 14, borderRadius: 12, marginTop: 18, backgroundColor: '#fff' }}
-          />
+          <View style={styles.inputContainer}>
+            <Ionicons name="mail-outline" size={20} color="#666" style={styles.inputIcon} />
+            <TextInput
+              placeholder="email@domain.com"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholderTextColor="#999"
+              style={styles.input}
+            />
+          </View>
 
           <PrimaryButtonEx title="Continue" onPress={requestOtp} loading={loading} disabled={loading} />
 
@@ -164,13 +173,29 @@ export default function Signup() {
 
           <Text style={{ fontSize: 18, fontWeight: '700', marginTop: 18, textAlign: 'center' }}>Personal Details</Text>
 
-          <TextInput placeholder="full name" value={name} onChangeText={setName} style={{ borderWidth: 1, borderColor: '#eee', padding: 12, borderRadius: 10, marginTop: 18, backgroundColor: '#fff' }} />
+          {/* Full Name Input */}
+          <View style={styles.inputContainer}>
+            <Ionicons name="person-outline" size={20} color="#666" style={styles.inputIcon} />
+            <TextInput 
+              placeholder="Full name" 
+              value={name} 
+              onChangeText={setName} 
+              autoCapitalize="words"
+              autoCorrect={false}
+              placeholderTextColor="#999"
+              style={styles.input}
+            />
+          </View>
 
+          {/* Date of Birth Input */}
           <TouchableOpacity 
             onPress={() => setShowDatePicker(true)} 
-            style={{ borderWidth: 1, borderColor: '#eee', padding: 12, borderRadius: 10, marginTop: 12, backgroundColor: '#fff', justifyContent: 'center' }}
+            style={styles.inputContainer}
           >
-            <Text style={{ color: dob ? '#000' : '#999' }}>{dob || 'date of birth'}</Text>
+            <Ionicons name="calendar-outline" size={20} color="#666" style={styles.inputIcon} />
+            <Text style={{ flex: 1, paddingVertical: 14, fontSize: 16, color: dob ? '#333' : '#999' }}>
+              {dob || 'Date of birth'}
+            </Text>
           </TouchableOpacity>
 
           {showDatePicker && (
@@ -185,11 +210,69 @@ export default function Signup() {
             />
           )}
 
-          <TextInput placeholder="username" value={username} onChangeText={setUsername} style={{ borderWidth: 1, borderColor: '#eee', padding: 12, borderRadius: 10, marginTop: 12, backgroundColor: '#fff' }} />
+          {/* Username Input */}
+          <View style={styles.inputContainer}>
+            <Ionicons name="at" size={20} color="#666" style={styles.inputIcon} />
+            <TextInput 
+              placeholder="Username" 
+              value={username} 
+              onChangeText={setUsername}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholderTextColor="#999"
+              style={styles.input}
+            />
+          </View>
 
-          <TextInput placeholder="password" secureTextEntry value={password} onChangeText={setPassword} style={{ borderWidth: 1, borderColor: '#eee', padding: 12, borderRadius: 10, marginTop: 12, backgroundColor: '#fff' }} />
+          {/* Password Input */}
+          <View style={styles.inputContainer}>
+            <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.inputIcon} />
+            <TextInput 
+              placeholder="Password" 
+              secureTextEntry={!showPassword}
+              value={password} 
+              onChangeText={setPassword}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholderTextColor="#999"
+              style={styles.input}
+            />
+            <TouchableOpacity 
+              onPress={() => setShowPassword(!showPassword)}
+              style={styles.eyeIcon}
+            >
+              <Ionicons 
+                name={showPassword ? "eye-outline" : "eye-off-outline"} 
+                size={22} 
+                color="#666" 
+              />
+            </TouchableOpacity>
+          </View>
 
-          <TextInput placeholder="confirm password" secureTextEntry value={confirmPassword} onChangeText={setConfirmPassword} style={{ borderWidth: 1, borderColor: '#eee', padding: 12, borderRadius: 10, marginTop: 12, backgroundColor: '#fff' }} />
+          {/* Confirm Password Input */}
+          <View style={styles.inputContainer}>
+            <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.inputIcon} />
+            <TextInput 
+              placeholder="Confirm password" 
+              secureTextEntry={!showConfirmPassword}
+              value={confirmPassword} 
+              onChangeText={setConfirmPassword}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholderTextColor="#999"
+              style={styles.input}
+            />
+            <TouchableOpacity 
+              onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+              style={styles.eyeIcon}
+            >
+              <Ionicons 
+                name={showConfirmPassword ? "eye-outline" : "eye-off-outline"} 
+                size={22} 
+                color="#666" 
+              />
+            </TouchableOpacity>
+          </View>
 
           <View style={{ marginTop: 18 }}>
             <PrimaryButtonEx
@@ -210,3 +293,29 @@ export default function Signup() {
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F5F6FA',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    marginTop: 12,
+    paddingHorizontal: 14,
+  },
+  inputIcon: {
+    marginRight: 10,
+  },
+  input: { 
+    flex: 1,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: '#333',
+  },
+  eyeIcon: {
+    padding: 4,
+    marginLeft: 8,
+  },
+});
