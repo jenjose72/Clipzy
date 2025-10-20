@@ -259,7 +259,7 @@ const Profile = () => {
     }
 
     return (
-      <TouchableOpacity onPress={() => router.push({ pathname: '/(tabs)/clip/[clipId]', params: { clipId: String(item.clip.id), clipUrl: item.clip.clipUrl, userId: String(profile?.id || profile?.user_id || '') } })} style={[styles.gridItem, { width: itemSize, height: itemSize }]}> 
+      <TouchableOpacity onPress={() => router.push({ pathname: '/(tabs)/clip/[clipId]', params: { clipId: String(item.clip.id), clipUrl: item.clip.clipUrl, caption: item.clip.caption || '', userId: String(profile?.id || profile?.user_id || '') } })} style={[styles.gridItem, { width: itemSize, height: itemSize }]}> 
         {item.type === 'video' && item.clip ? (
           // prefer generated thumbnail if available
           <Image source={{ uri: thumbnails[item.clip.id] || item.clip.clipUrl }} style={{ width: '100%', height: '100%' }} />
@@ -293,7 +293,7 @@ const Profile = () => {
             {profile?.profile_pic ? (
               <Image source={{ uri: profile.profile_pic }} style={styles.avatarCircle} />
             ) : (
-              <View style={styles.avatarCircle} />
+              <Image source={require('@/assets/images/avatar.png')} style={styles.avatarCircle} />
             )}
             <TouchableOpacity style={[styles.editBtn, { marginTop: 12 }]} onPress={pickAndUpload}>
               <Text style={styles.editBtnText}>{loading ? 'Fetching...' : 'Change Avatar'}</Text>

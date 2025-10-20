@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { StyleSheet, View, Dimensions, TouchableWithoutFeedback, FlatList, TouchableOpacity, SafeAreaView, Modal, TextInput, KeyboardAvoidingView, Platform, Alert, Text, Animated, Easing, RefreshControl, Share, Switch } from 'react-native';
+import { StyleSheet, View, Dimensions, TouchableWithoutFeedback, FlatList, TouchableOpacity, SafeAreaView, Modal, TextInput, KeyboardAvoidingView, Platform, Alert, Text, Animated, Easing, RefreshControl, Share, Switch, Image } from 'react-native';
 import { useAuth } from '../../components/AuthContext';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -7,6 +7,7 @@ import { Video, ResizeMode, AVPlaybackStatus } from 'expo-av';
 import { Ionicons, FontAwesome, Fontisto, Feather } from '@expo/vector-icons';
 import { backendUrl } from '@/constants/Urls';
 import { Snackbar } from 'react-native-paper';
+import { useIsFocused } from '@react-navigation/native';
 
 const { width, height } = Dimensions.get('window');
 
@@ -44,6 +45,7 @@ export default function HomeScreen() {
   const [selectedFollowers, setSelectedFollowers] = useState<Record<string, boolean>>({});
   const [sharing, setSharing] = useState(false);
   const [shareStep, setShareStep] = useState<'menu'|'followers'>('menu');
+  const isFocused = useIsFocused();
 
   useEffect(() => {
     if (!user) {
@@ -118,6 +120,29 @@ export default function HomeScreen() {
       console.error('Error in playingIndex useEffect prefetch:', err);
     }
   }, [playingIndex, selectedPage, clips, loading]);
+
+  useEffect(() => {
+    if (isFocused) {
+      // Resume playback of the currently playing video
+      const currentVideoRef = videoRefs.current[playingIndex];
+      if (currentVideoRef) {
+        currentVideoRef.playAsync().catch((error) => {
+          console.error('Error resuming video playback:', error);
+        });
+        startProgressUpdates(playingIndex);
+      }
+    } else {
+      // Pause all videos when the page is blurred
+      videoRefs.current.forEach((videoRef, index) => {
+        if (videoRef) {
+          videoRef.pauseAsync().catch((error) => {
+            console.error('Error pausing video playback:', error);
+          });
+        }
+        stopProgressUpdates(index);
+      });
+    }
+  }, [isFocused]);
 
   const getCurrentClips = () => {
     return selectedPage === 'forYou' ? clips : newCreatorsClips;
@@ -531,9 +556,20 @@ export default function HomeScreen() {
   const handleLike = async (index: number) => {
     const currentClips = getCurrentClips();
     const videoId = currentClips[index]?.id;
-    const newLikedState = !likedArr[index];
+    const currentLikedState = likedArr[index];
+    const newLikedState = !currentLikedState;
+
+    console.log('❤️ LIKE CLICKED - Page:', selectedPage, 'Index:', index, 'VideoId:', videoId, 'CurrentState:', currentLikedState, 'NewState:', newLikedState);
 
     if (!videoId) return;
+
+    // Optimistically update UI immediately
+    setLikedArr(arr => {
+      const newArr = [...arr];
+      newArr[index] = newLikedState;
+      console.log('❤️ LIKE STATE UPDATED - Array length:', newArr.length, 'Index:', index, 'New value:', newArr[index]);
+      return newArr;
+    });
 
     try {
       const token = await AsyncStorage.getItem('accessToken');
@@ -552,16 +588,26 @@ export default function HomeScreen() {
       });
 
       if (response.ok) {
-        // Update local state only after successful API call
-        setLikedArr(arr => arr.map((v, i) => (i === index ? newLikedState : v)));
-        
+        console.log('❤️ LIKE API SUCCESS - VideoId:', videoId, 'NewState:', newLikedState);
         // Track like action for metrics
         await trackLike(videoId, newLikedState);
       } else {
-        console.error('Failed to update like status');
+        console.error('Failed to update like status, reverting...');
+        // Revert on failure
+        setLikedArr(arr => {
+          const newArr = [...arr];
+          newArr[index] = currentLikedState;
+          return newArr;
+        });
       }
     } catch (error) {
       console.error('Error updating like:', error);
+      // Revert on error
+      setLikedArr(arr => {
+        const newArr = [...arr];
+        newArr[index] = currentLikedState;
+        return newArr;
+      });
     }
   };
 
@@ -781,14 +827,11 @@ export default function HomeScreen() {
   });
 
   const renderItem = ({ item, index }: { item: any; index: number }) => {
-    const animatedWidth = progressAnimations.current[index]?.interpolate({
-      inputRange: [0, 1],
-      outputRange: ['0%', '100%'],
-    }) || '0%';
-
     return (
       <View style={styles.videoContainer}>
-        <TouchableWithoutFeedback onPress={() => handleVideoTap(index)}>
+        <TouchableWithoutFeedback onPress={() => {
+          handleVideoTap(index); // Ensure this function is called on tap
+        }}>
           <Video
             ref={ref => { videoRefs.current[index] = ref; }}
             source={{ uri: item.clipUrl }}
@@ -850,11 +893,8 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
         ) : null}
-        <View style={styles.progressBarBg}>
-          <Animated.View style={[styles.progressBarFill, { width: animatedWidth }]} />
-        </View>
         <SafeAreaView style={styles.featureButtonsContainer}>
-                  <TouchableOpacity style={styles.featureButton} onPress={() => handleLike(index)}>
+          <TouchableOpacity style={styles.featureButton} onPress={() => handleLike(index)}>
             <Ionicons name={likedArr[index] ? "heart" : "heart-outline"} size={32} color={likedArr[index] ? "#E91E63" : "white"} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.featureButton} onPress={() => handleCommentPress(index)}>
@@ -867,22 +907,6 @@ export default function HomeScreen() {
         {/* Caption overlay */}
         <View style={styles.captionContainer}>
           <Text style={styles.captionText}>{item.caption}</Text>
-          {index === playingIndex && (
-            <>
-              <Text style={[styles.captionText, { fontSize: 12, marginTop: 5 }]}>
-                Watched: {(displayWatchedTime / 1000).toFixed(1)}s
-              </Text>
-              <Text style={[styles.captionText, { fontSize: 11, marginTop: 3, color: '#FFD700' }]}>
-                Video ID: {item.id}
-              </Text>
-              <Text style={[styles.captionText, { fontSize: 11, marginTop: 2, color: '#90EE90' }]}>
-                Categories: {item.categories?.join(', ') || 'None'}
-              </Text>
-              <Text style={[styles.captionText, { fontSize: 11, marginTop: 2, color: '#87CEEB' }]}>
-                Page: {selectedPage}
-              </Text>
-            </>
-          )}
         </View>
       </View>
     );
@@ -1030,104 +1054,147 @@ export default function HomeScreen() {
       </Modal>
 
       {/* Share Modal */}
-      <Modal visible={shareModalVisible} animationType="slide">
-        <SafeAreaView style={{ flex: 1, backgroundColor: '#f8f9fa' }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomColor: '#e0e0e0', borderBottomWidth: 1, backgroundColor: '#fff' }}>
-            <TouchableOpacity onPress={() => setShareModalVisible(false)} style={{ padding: 8 }}>
-              <Ionicons name="close" size={24} color="#333" />
-            </TouchableOpacity>
-            <Text style={{ fontSize: 18, fontWeight: '700', color: '#111' }}>Send to followers</Text>
-            <View style={{ width: 40 }} />
-          </View>
+      <Modal visible={shareModalVisible} animationType="slide" transparent={true}>
+        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.7)' }}>
+          <View style={{ backgroundColor: '#1a1a1a', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: height * 0.6, paddingBottom: Platform.OS === 'ios' ? 20 : 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomColor: '#333', borderBottomWidth: 1, backgroundColor: '#1a1a1a', borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
+              <TouchableOpacity onPress={() => setShareModalVisible(false)} style={{ padding: 8 }}>
+                <Ionicons name="close" size={28} color="#fff" />
+              </TouchableOpacity>
+              <Text style={{ fontSize: 16, fontWeight: '600', color: '#fff' }}>Share</Text>
+              <View style={{ width: 40 }} />
+            </View>
 
-          <View style={{ flex: 1, paddingHorizontal: 12, paddingTop: 12 }}>
-            <Text style={{ fontSize: 14, color: '#666', marginBottom: 12, paddingHorizontal: 4 }}>Select followers to share this clip:</Text>
-            <FlatList 
-              data={followersList} 
-              keyExtractor={(it) => String(it.user_id || it.id || it.username)} 
-              onEndReachedThreshold={0.1}
-              scrollEnabled={followersList.length > 4}
-              renderItem={({ item }) => {
-                const id = String(item.user_id || item.id || item.username);
-                const isSelected = !!selectedFollowers[id];
-                return (
-                  <TouchableOpacity 
-                    onPress={() => setSelectedFollowers(prev => ({ ...prev, [id]: !prev[id] }))}
-                    style={{ 
-                      flexDirection: 'row', 
-                      alignItems: 'center', 
-                      paddingVertical: 12, 
-                      paddingHorizontal: 12, 
-                      marginBottom: 8, 
-                      backgroundColor: isSelected ? '#e3f2fd' : '#fff',
-                      borderRadius: 12,
-                      borderWidth: 1.5,
-                      borderColor: isSelected ? '#4F8EF7' : '#e0e0e0'
-                    }}
-                  >
-                    <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#ddd', alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
-                      <Text style={{ fontSize: 18, fontWeight: '700', color: '#666' }}>
-                        {(item.name || item.username).charAt(0).toUpperCase()}
+            <View style={{ maxHeight: height * 0.35, paddingTop: 20, backgroundColor:'#1a1a1a' }}>
+              <FlatList 
+                data={followersList} 
+                keyExtractor={(it) => String(it.user_id || it.id || it.username)}
+                numColumns={2}
+                contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 10 }}
+                columnWrapperStyle={{ justifyContent: 'space-around', marginBottom: 24 }}
+                renderItem={({ item }) => {
+                  const id = String(item.user_id || item.id || item.username);
+                  const isSelected = !!selectedFollowers[id];
+                  // Check multiple possible field names for profile picture
+                  const profilePicUrl = item.profile_picture_url || item.profile_pic || item.profilePic;
+                  const fullProfilePicUrl = profilePicUrl ? (profilePicUrl.startsWith('http') ? profilePicUrl : `${backendUrl}${profilePicUrl}`) : null;
+                  
+                  console.log('Profile pic URL for', item.username, ':', fullProfilePicUrl); // Debug log
+                  
+                  return (
+                    <TouchableOpacity 
+                      onPress={() => setSelectedFollowers(prev => ({ ...prev, [id]: !prev[id] }))}
+                      style={{ 
+                        alignItems: 'center',
+                        width: width / 2 - 32,
+                        marginBottom: 8,
+                      }}
+                    >
+                      <View style={{ position: 'relative' }}>
+                        <View style={{ 
+                          width: 80, 
+                          height: 80, 
+                          borderRadius: 40, 
+                          backgroundColor: '#2a2a2a', 
+                          alignItems: 'center', 
+                          justifyContent: 'center',
+                          borderWidth: isSelected ? 3 : 0,
+                          borderColor: '#4F8EF7',
+                          overflow: 'hidden',
+                        }}>
+                          {fullProfilePicUrl ? (
+                            <Image 
+                              source={{ uri: fullProfilePicUrl }} 
+                              style={{ width: '100%', height: '100%' }}
+                              resizeMode="cover"
+                              onError={(e) => console.log('Image load error:', e.nativeEvent.error)}
+                            />
+                          ) : (
+                            <Text style={{ fontSize: 32, fontWeight: '700', color: '#999' }}>
+                              {(item.name || item.username).charAt(0).toUpperCase()}
+                            </Text>
+                          )}
+                        </View>
+                        {isSelected && (
+                          <View style={{ 
+                            position: 'absolute', 
+                            bottom: 0, 
+                            right: 0, 
+                            width: 28, 
+                            height: 28, 
+                            borderRadius: 14, 
+                            backgroundColor: '#4F8EF7', 
+                            alignItems: 'center', 
+                            justifyContent: 'center',
+                            borderWidth: 3,
+                            borderColor: '#1a1a1a'
+                          }}>
+                            <Ionicons name="checkmark" size={16} color="#fff" />
+                          </View>
+                        )}
+                      </View>
+                      <Text style={{ 
+                        marginTop: 8, 
+                        fontSize: 13, 
+                        color: '#fff',
+                        textAlign: 'center',
+                        width: '90%',
+                        fontWeight: '500',
+                      }} numberOfLines={1}>
+                        {item.name || item.username}
                       </Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontWeight: '600', fontSize: 15, color: '#111' }}>{item.name || item.username}</Text>
-                      <Text style={{ fontSize: 13, color: '#999', marginTop: 2 }}>@{item.username}</Text>
-                    </View>
-                    <View style={{ width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: isSelected ? '#4F8EF7' : '#ddd', backgroundColor: isSelected ? '#4F8EF7' : 'transparent', alignItems: 'center', justifyContent: 'center' }}>
-                      {isSelected && <Ionicons name="checkmark" size={14} color="#fff" />}
-                    </View>
-                  </TouchableOpacity>
-                );
-              }} 
-            />
-          </View>
+                    </TouchableOpacity>
+                  );
+                }} 
+              />
+            </View>
 
-          <View style={{ paddingHorizontal: 16, paddingBottom: 20, paddingTop: 12, borderTopColor: '#e0e0e0', borderTopWidth: 1, backgroundColor: '#fff', flexDirection: 'row', gap: 8 }}>
-            <TouchableOpacity 
-              style={{ flex: 1, backgroundColor: '#f0f0f0', paddingVertical: 13, paddingHorizontal: 16, borderRadius: 10, alignItems: 'center' }} 
-              onPress={() => setShareModalVisible(false)}
-            >
-              <Text style={{ fontWeight: '700', color: '#333', fontSize: 15 }}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={{ 
-                flex: 1, 
-                backgroundColor: '#4F8EF7', 
-                paddingVertical: 13, 
-                paddingHorizontal: 16, 
-                borderRadius: 10, 
-                alignItems: 'center',
-                opacity: sharing ? 0.6 : 1
-              }} 
-              disabled={sharing || Object.values(selectedFollowers).every(v => !v)}
-              onPress={async () => {
-                try {
-                  setSharing(true);
-                  const token = await AsyncStorage.getItem('accessToken');
-                  const currentClips = getCurrentClips();
-                  const currentClip = currentClips[currentVideoIndex];
-                  const selectedIds = Object.keys(selectedFollowers).filter(k => selectedFollowers[k]);
-                  for (const sid of selectedIds) {
-                    try {
-                      const cr = await fetch(`${backendUrl}/chat/createRoom/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ participant_id: sid }) });
-                      const crd = await cr.json().catch(() => null);
-                      const roomId = crd?.room_id;
-                      if (roomId) {
-                        await fetch(`${backendUrl}/chat/sendMessage/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ room_id: roomId, content: '', video_id: currentClip?.id }) });
-                      }
-                    } catch (e) { console.log('Error creating room/sending', e); }
-                  }
-                } catch (e) { console.log('Share to followers error', e); }
-                setSharing(false);
-                setShareModalVisible(false);
-                setSelectedFollowers({});
-              }}
-            >
-              <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>{sharing ? 'Sending...' : 'Send'}</Text>
-            </TouchableOpacity>
+            <View style={{ paddingHorizontal: 16, paddingTop: 12, borderTopColor: '#333', borderTopWidth: 1, backgroundColor: '#1a1a1a', flexDirection: 'row', gap: 8, paddingBottom: 8 }}>
+              <TouchableOpacity 
+                style={{ flex: 1, backgroundColor: '#2a2a2a', paddingVertical: 13, paddingHorizontal: 16, borderRadius: 10, alignItems: 'center' }} 
+                onPress={() => setShareModalVisible(false)}
+              >
+                <Text style={{ fontWeight: '700', color: '#fff', fontSize: 15 }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={{ 
+                  flex: 1, 
+                  backgroundColor: '#4F8EF7', 
+                  paddingVertical: 13, 
+                  paddingHorizontal: 16, 
+                  borderRadius: 10, 
+                  alignItems: 'center',
+                  opacity: sharing ? 0.6 : 1
+                }} 
+                disabled={sharing || Object.values(selectedFollowers).every(v => !v)}
+                onPress={async () => {
+                  try {
+                    setSharing(true);
+                    const token = await AsyncStorage.getItem('accessToken');
+                    const currentClips = getCurrentClips();
+                    const currentClip = currentClips[currentVideoIndex];
+                    const selectedIds = Object.keys(selectedFollowers).filter(k => selectedFollowers[k]);
+                    for (const sid of selectedIds) {
+                      try {
+                        const cr = await fetch(`${backendUrl}/chat/createRoom/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ participant_id: sid }) });
+                        const crd = await cr.json().catch(() => null);
+                        const roomId = crd?.room_id;
+                        if (roomId) {
+                          await fetch(`${backendUrl}/chat/sendMessage/`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, body: JSON.stringify({ room_id: roomId, content: '', video_id: currentClip?.id }) });
+                        }
+                      } catch (e) { console.log('Error creating room/sending', e); }
+                    }
+                  } catch (e) { console.log('Share to followers error', e); }
+                  setSharing(false);
+                  setShareModalVisible(false);
+                  setSelectedFollowers({});
+                }}
+              >
+                <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>{sharing ? 'Sending...' : 'Send'}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </SafeAreaView>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -1135,10 +1202,9 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   videoContainer: {
-    width: width,
-    height: height, // Use full screen height for proper paging
-    alignItems: 'center',
+    flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: '#000',
   },
   video: {
@@ -1146,26 +1212,10 @@ const styles = StyleSheet.create({
     height: height, // Use full screen height
     backgroundColor: '#000',
   },
-  progressBarBg: {
-    position: 'absolute',
-    bottom: 110, // Position above the bottom safe area and navbar
-    left: 0,
-    right: 0,
-    height: 6,
-    backgroundColor: '#333',
-    borderRadius: 3,
-    marginHorizontal: 16,
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: 6,
-    backgroundColor: '#fff',
-    borderRadius: 3,
-  },
   featureButtonsContainer: {
     position: 'absolute',
     right: 5,
-    bottom: 150, // Adjust for full screen height
+    bottom: 100,
     alignItems: 'center',
   },
   featureButton: {
@@ -1175,13 +1225,12 @@ const styles = StyleSheet.create({
     height: 60,
     justifyContent: 'center',
     alignItems: 'center',
- 
   },
   captionContainer: {
     position: 'absolute',
-    bottom: 210, // Adjust for full screen height
+    bottom: 100, // Adjusted to move it slightly higher
     left: 16,
-    right: 80,
+    right: 16,
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
     borderRadius: 8,
     padding: 8,
@@ -1189,7 +1238,7 @@ const styles = StyleSheet.create({
   captionText: {
     color: 'white',
     fontSize: 14,
-    fontWeight: '600',
+    textAlign: 'center',
   },
   container: {
     flex: 1,

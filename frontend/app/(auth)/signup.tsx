@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { View, Text, TextInput, Pressable, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, TextInput, Pressable, ActivityIndicator, TouchableOpacity, Platform } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../../components/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { backendUrl } from '@/constants/Urls';
 import ClipzyLogo from '@/components/icons/clipzyLogo';
+import DateTimePicker from '@react-native-community/datetimepicker';
 // Using a simple text logo placeholder here to avoid changing the ClipzyLogo component
 
 type Step = 1 | 3;
@@ -20,11 +21,20 @@ export default function Signup() {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [dob, setDob] = useState('');
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   
   const router = useRouter();
   const { login } = useAuth();
+
+  const onDateChange = (event: any, selectedDate?: Date) => {
+    const currentDate = selectedDate || new Date();
+    setShowDatePicker(Platform.OS === 'ios');
+    setSelectedDate(currentDate);
+    setDob(currentDate.toISOString().split('T')[0]); // Format as YYYY-MM-DD
+  };
 
   const handleBack = () => {
     if (step > 1) {
@@ -39,6 +49,8 @@ export default function Signup() {
   const requestOtp = () => {
     setError('');
     if (!email) return setError('Please enter your email');
+    const emailRegex = /^\S+@\S+\.\S+$/;
+    if (!emailRegex.test(email)) return setError('Please enter a valid email address');
     setLoading(true);
     setTimeout(() => {
       setLoading(false);
@@ -154,7 +166,24 @@ export default function Signup() {
 
           <TextInput placeholder="full name" value={name} onChangeText={setName} style={{ borderWidth: 1, borderColor: '#eee', padding: 12, borderRadius: 10, marginTop: 18, backgroundColor: '#fff' }} />
 
-          <TextInput placeholder="date of birth" value={dob} onChangeText={setDob} style={{ borderWidth: 1, borderColor: '#eee', padding: 12, borderRadius: 10, marginTop: 12, backgroundColor: '#fff' }} />
+          <TouchableOpacity 
+            onPress={() => setShowDatePicker(true)} 
+            style={{ borderWidth: 1, borderColor: '#eee', padding: 12, borderRadius: 10, marginTop: 12, backgroundColor: '#fff', justifyContent: 'center' }}
+          >
+            <Text style={{ color: dob ? '#000' : '#999' }}>{dob || 'date of birth'}</Text>
+          </TouchableOpacity>
+
+          {showDatePicker && (
+            <DateTimePicker
+              testID="dateTimePicker"
+              value={selectedDate}
+              mode="date"
+              is24Hour={true}
+              display="default"
+              onChange={onDateChange}
+              maximumDate={new Date()} // Prevent future dates
+            />
+          )}
 
           <TextInput placeholder="username" value={username} onChangeText={setUsername} style={{ borderWidth: 1, borderColor: '#eee', padding: 12, borderRadius: 10, marginTop: 12, backgroundColor: '#fff' }} />
 

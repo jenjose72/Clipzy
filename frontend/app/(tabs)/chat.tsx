@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { View, Text, TouchableOpacity, FlatList, StyleSheet, Image, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, FlatList, StyleSheet, Image, ActivityIndicator, RefreshControl } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { backendUrl } from '@/constants/Urls';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 
 const Chat = () => {
   const [chatRooms, setChatRooms] = useState<any[]>([]);
@@ -16,9 +17,13 @@ const Chat = () => {
   const [avatarCache, setAvatarCache] = useState<Record<string, string | null>>({});
   const fetchingAvatars = React.useRef<Record<string, boolean>>({});
   const router = useRouter();
+  const [refreshing, setRefreshing] = useState(false);
+  const isFocused = useIsFocused();
+  const pollingInterval = React.useRef<any>(null);
+  const isInitialMount = React.useRef(true);
 
-  const getChats = async () => {
-    setLoading(true);
+  const getChats = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const token = await AsyncStorage.getItem('accessToken');
       const current = await AsyncStorage.getItem('user');
@@ -226,7 +231,7 @@ const Chat = () => {
       setChatRooms([]);
       setFollowingUsers([]);
     }
-    setLoading(false);
+    if (!silent) setLoading(false);
   };
 
   // debug: log fetched rooms so we can inspect profile_pic fields in the app logs
@@ -333,8 +338,51 @@ const Chat = () => {
       } catch (e) {}
     };
     initUser();
-    getChats();
+    getChats(false); // Initial load with loading state
   }, []);
+
+  // Polling effect - refresh chat list every 5 seconds when screen is focused
+  useEffect(() => {
+    if (!isFocused) {
+      // Clear polling when not focused
+      if (pollingInterval.current) {
+        clearInterval(pollingInterval.current);
+        pollingInterval.current = null;
+      }
+      return;
+    }
+
+    // Skip immediate poll on initial mount (already called in previous useEffect)
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+    } else {
+      // Poll immediately when focused (but not on initial mount)
+      getChats(true);
+    }
+
+    // Then poll every 5 seconds (silently, no loading indicator)
+    pollingInterval.current = setInterval(() => {
+      getChats(true);
+    }, 5000);
+
+    return () => {
+      if (pollingInterval.current) {
+        clearInterval(pollingInterval.current);
+        pollingInterval.current = null;
+      }
+    };
+  }, [isFocused]);
+
+  const onRefresh = async () => {
+    try {
+      setRefreshing(true);
+      await getChats();
+    } catch (e) {
+      // ignore
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const sendMessageToRoom = async (roomId: number, content: string, videoId?: number) => {
     try {
@@ -636,8 +684,8 @@ const Chat = () => {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.headerWrapper}>
         <Text style={styles.title}>Messages</Text>
-        <TouchableOpacity style={styles.addButton} activeOpacity={0.7}>
-          <Ionicons name="add" size={26} color="#fff" />
+        <TouchableOpacity style={styles.addButton} activeOpacity={0.7} onPress={onRefresh} accessibilityLabel="Refresh conversations">
+          <Ionicons name="chatbubbles-outline" size={22} color="#fff" />
         </TouchableOpacity>
       </View>
 
@@ -652,6 +700,7 @@ const Chat = () => {
             keyExtractor={(item, index) => item?.room_id ? `room_${item.room_id}` : `room_${index}`}
             renderItem={({ item }) => renderRoom({ item })}
             scrollEnabled={true}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#4F8EF7']} tintColor="#4F8EF7" />}
             ItemSeparatorComponent={() => <View style={styles.separator} />}
             ListEmptyComponent={
               <View style={styles.emptyContainer}>

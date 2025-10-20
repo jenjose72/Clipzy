@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, Image } 
 import { Video, ResizeMode } from 'expo-av';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { backendUrl } from '@/constants/Urls';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -16,10 +17,9 @@ const ChatRoomPage = () => {
 	const [userId, setUserId] = useState<string | null>(null);
 	const [otherParticipant, setOtherParticipant] = useState<any | null>(null);
 	const [failedAvatar, setFailedAvatar] = useState<Record<string, boolean>>({});
-	// no thumbnail cache: keep message preview simple
-	const ws = useRef<WebSocket | null>(null);
-	const [wsReady, setWsReady] = useState(false);
 	const messagesRef = useRef<any[]>([]);
+	const pollingInterval = useRef<any>(null);
+	const isFocused = useIsFocused();
 	const router = useRouter();
 
 	useEffect(() => {
@@ -83,7 +83,7 @@ const ChatRoomPage = () => {
 	}, [roomId, userId]);
 
 	useEffect(() => {
-		// Fetch initial messages (optional, if you want to show history)
+		// Fetch initial messages
 		const fetchMessages = async () => {
 			setLoading(true);
 			try {
@@ -97,62 +97,85 @@ const ChatRoomPage = () => {
 				});
 				const data = await res.json();
 				if (res.ok && data.messages) {
-					setMessages(
-						data.messages.map((msg: any) => ({
-							text: msg.content,
-							sender: msg.sender.toString() === userId ? 'me' : msg.sender.toString(),
-							video: msg.video || null,
-							id: msg.id || null,
-						}))
-					);
+					const newMessages = data.messages.map((msg: any) => ({
+						text: msg.content,
+						sender: msg.sender.toString() === userId ? 'me' : msg.sender.toString(),
+						video: msg.video || null,
+						id: msg.id || null,
+					}));
+					setMessages(newMessages);
+					messagesRef.current = newMessages;
 				}
-			} catch {}
+			} catch (e) {
+				console.log('Error fetching messages:', e);
+			}
 			setLoading(false);
 		};
 		if (roomId && userId) fetchMessages();
 	}, [roomId, userId]);
 
+	// Polling effect - fetch new messages every 2 seconds when screen is focused
 	useEffect(() => {
-		// Connect to WebSocket for real-time chat
-		if (!roomId || !userId) return;
-		if (!ws.current) {
-			ws.current = new WebSocket(`ws://10.0.2.2:8000/ws/chat/${roomId}/`);
-			ws.current.onopen = () => setWsReady(true);
-			ws.current.onclose = () => setWsReady(false);
+		if (!roomId || !userId || !isFocused) {
+			// Clear polling when not focused
+			if (pollingInterval.current) {
+				clearInterval(pollingInterval.current);
+				pollingInterval.current = null;
+			}
+			return;
 		}
-		ws.current.onmessage = (e) => {
+
+		const pollMessages = async () => {
 			try {
-				const data = JSON.parse(e.data);
-				if (data.message || data.video) {
-					const msg = { text: data.message || '', sender: data.sender?.toString() === userId ? 'me' : data.sender?.toString(), video: data.video || null };
-					appendMessage(msg);
+				const token = await AsyncStorage.getItem('accessToken');
+				const res = await fetch(`${backendUrl}/chat/getMessages/${roomId}`, {
+					method: 'GET',
+					headers: {
+						'Authorization': `Bearer ${token}`,
+						'Content-Type': 'application/json',
+					},
+				});
+				const data = await res.json();
+				if (res.ok && data.messages) {
+					const newMessages = data.messages.map((msg: any) => ({
+						text: msg.content,
+						sender: msg.sender.toString() === userId ? 'me' : msg.sender.toString(),
+						video: msg.video || null,
+						id: msg.id || null,
+					}));
+					
+					// Only update if messages have changed
+					if (JSON.stringify(newMessages) !== JSON.stringify(messagesRef.current)) {
+						setMessages(newMessages);
+						messagesRef.current = newMessages;
+					}
 				}
-			} catch {}
+			} catch (e) {
+				console.log('Error polling messages:', e);
+			}
 		};
+
+		// Poll immediately on focus
+		pollMessages();
+
+		// Then poll every 2 seconds
+		pollingInterval.current = setInterval(pollMessages, 2000);
+
 		return () => {
-			ws.current?.close();
+			if (pollingInterval.current) {
+				clearInterval(pollingInterval.current);
+				pollingInterval.current = null;
+			}
 		};
-	}, [roomId, userId]);
+	}, [roomId, userId, isFocused]);
 
 	const sendMessage = async () => {
 		if (!input.trim() || !userId) return;
 
-		// optimistic UI update so user sees message immediately
-		setMessages(prev => [...prev, { text: input, sender: 'me' }]);
+		const messageText = input;
+		setInput(''); // Clear input immediately for better UX
 
-		// Try to send over websocket if available
-		if (wsReady && ws.current) {
-			try {
-				ws.current.send(JSON.stringify({ message: input, sender: userId }));
-				console.log('sent via websocket', { roomId, input });
-			} catch (e) {
-				console.log('websocket send failed, will POST instead', e);
-			}
-		} else {
-			console.log('websocket not ready, sending via REST only');
-		}
-
-		// Always POST to the REST endpoint as a fallback / persistence
+		// Send message via REST API
 		try {
 			const token = await AsyncStorage.getItem('accessToken');
 			const res = await fetch(`${backendUrl}/chat/sendMessage/`, {
@@ -161,36 +184,48 @@ const ChatRoomPage = () => {
 					'Authorization': `Bearer ${token}`,
 					'Content-Type': 'application/json',
 				},
-				body: JSON.stringify({ room_id: roomId, content: input }),
+				body: JSON.stringify({ room_id: roomId, content: messageText }),
 			});
 			const data = await res.json().catch(() => null);
-			if (!res.ok) console.log('POST sendMessage failed', data);
-			else console.log('POST sendMessage succeeded', data);
+			if (res.ok) {
+				console.log('Message sent successfully');
+				// Immediately poll for new messages after sending
+				setTimeout(async () => {
+					try {
+						const pollRes = await fetch(`${backendUrl}/chat/getMessages/${roomId}`, {
+							method: 'GET',
+							headers: {
+								'Authorization': `Bearer ${token}`,
+								'Content-Type': 'application/json',
+							},
+						});
+						const pollData = await pollRes.json();
+						if (pollRes.ok && pollData.messages) {
+							const newMessages = pollData.messages.map((msg: any) => ({
+								text: msg.content,
+								sender: msg.sender.toString() === userId ? 'me' : msg.sender.toString(),
+								video: msg.video || null,
+								id: msg.id || null,
+							}));
+							setMessages(newMessages);
+							messagesRef.current = newMessages;
+						}
+					} catch (e) {
+						console.log('Error polling after send:', e);
+					}
+				}, 200);
+			} else {
+				console.log('Failed to send message:', data);
+			}
 		} catch (e) {
-			console.log('POST sendMessage error', e);
+			console.log('Error sending message:', e);
 		}
-
-		setInput('');
 	};
 
-	// keep a ref copy of messages to avoid stale closures during websocket callbacks
+	// keep a ref copy of messages to avoid stale closures
 	useEffect(() => {
 		messagesRef.current = messages;
 	}, [messages]);
-
-	const isDuplicateMessage = (msg: { text: string; sender: string }) => {
-		// check last 6 messages for same text & sender
-		const recent = messagesRef.current.slice(-6);
-		return recent.some(m => m.text === msg.text && m.sender === msg.sender);
-	};
-
-	const appendMessage = (msg: { text: string; sender: string }) => {
-		if (isDuplicateMessage(msg)) {
-			console.log('duplicate message ignored', msg);
-			return;
-		}
-		setMessages(prev => [...prev, msg]);
-	};
 
 
 
